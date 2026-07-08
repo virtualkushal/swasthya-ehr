@@ -72,6 +72,31 @@ and `.env.example` (the template collaborators copy to `backend/.env`).
 **Goal:** a running Django API connected to PostgreSQL, with one test endpoint, so the
 backend foundation is proven before any features are built.
 
+**In plain words (how we actually did it):**
+We started completely empty, so the first job was to give the backend a home. We made a
+`backend/` folder and set up an isolated Python "virtual environment" inside it — think of
+this as a clean, private box where this project's tools live, so they never clash with
+anything else on the computer. Into that box we installed Django (the web framework),
+Django REST Framework (which turns Django into an API that speaks JSON), plus helpers for
+logins (JWT), for letting the React app talk to us (CORS), and for talking to PostgreSQL.
+
+Next we asked Django to generate its starting skeleton — a project called `config` (the
+control room: settings and routing) and an app called `core` (where all our real features
+will eventually live). Out of the box Django wanted to use a tiny throwaway database, so we
+rewired its settings to point at our real PostgreSQL `swasthya` database instead. We were
+careful here: instead of typing the database password directly into the code (which would
+then get uploaded to GitHub for anyone to see), we put all secrets in a separate hidden
+`.env` file that Git is told to ignore. The code just reads from that file at startup.
+
+With the plumbing in place, we built one tiny "is anyone home?" endpoint at
+`/api/v1/health/`. It does nothing clever — it just answers "ok" — but that is exactly the
+point: if we can call it and get "ok" back, it proves the whole chain works (browser →
+Django → back again). Before trusting it, we ran Django's migrations, which is the step
+that actually creates tables in PostgreSQL; the fact that it succeeded told us the database
+connection and password were correct. Finally we started the server, called the health URL,
+and saw the "ok" response come back — so the backend foundation is real and working, not
+just written.
+
 **What was done, step by step:**
 
 1. **Virtual environment & dependencies.** Created `backend/venv/` and installed:
