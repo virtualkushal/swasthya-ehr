@@ -41,12 +41,17 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.postgres",
     # Third-party
     "rest_framework",
     "corsheaders",
     # Local
     "core",
 ]
+
+# Our custom user model = hospital staff (role lives on the user for JWT).
+AUTH_USER_MODEL = "core.Staff"
+
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
