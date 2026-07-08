@@ -37,3 +37,6 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 *.swp
+
+# Local-only progress log (not shared on GitHub)
+docs/PROGRESS.md
