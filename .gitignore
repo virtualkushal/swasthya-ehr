@@ -1,0 +1,39 @@
+# ===== Secrets =====
+.env
+*.env
+!.env.example
+
+# ===== Python / Django (backend) =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.Python
+venv/
+.venv/
+env/
+db.sqlite3
+db.sqlite3-journal
+*.log
+staticfiles/
+media/
+.pytest_cache/
+.mypy_cache/
+
+# ===== Node / React (frontend) =====
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ===== Editor / OS =====
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
