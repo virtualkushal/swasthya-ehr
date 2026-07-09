@@ -38,26 +38,40 @@ export default function LoginPage() {
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
       {/* left: form */}
+      <AuthArtwork />
+
+      {/* right: artwork */}
       <div className="flex items-center justify-center bg-slate-50 p-6 sm:p-10">
         <div className="w-full max-w-sm">
           <div className="mb-8 lg:hidden">
             <BrandMark />
           </div>
 
-          <h2 className="text-2xl font-bold text-slate-800">Welcome back</h2>
+          <h2 className="text-2xl font-bold text-slate-800 font-display">
+            Welcome back
+          </h2>
           <p className="mt-1 text-sm text-slate-500">
             Sign in to continue to your dashboard.
           </p>
 
           {/* Patient / Staff toggle */}
-          <div className="mt-6 grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
+          {/* Patient / Staff toggle */}
+          <div className="relative mt-6 grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
+            {/* sliding indicator */}
+            <div
+              className={
+                "absolute inset-y-1 w-[calc(50%-4px)] rounded-lg bg-white shadow-sm transition-transform duration-300 ease-out " +
+                (isPatient ? "translate-x-0" : "translate-x-[calc(100%+8px)]")
+              }
+            />
+
             <button
               type="button"
               onClick={() => setMode("patient")}
               className={
-                "flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors " +
+                "relative z-10 flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors " +
                 (isPatient
-                  ? "bg-white text-teal-700 shadow-sm"
+                  ? "text-teal-700"
                   : "text-slate-500 hover:text-slate-700")
               }
             >
@@ -67,9 +81,9 @@ export default function LoginPage() {
               type="button"
               onClick={() => setMode("staff")}
               className={
-                "flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors " +
+                "relative z-10 flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors " +
                 (!isPatient
-                  ? "bg-white text-blue-700 shadow-sm"
+                  ? "text-blue-700"
                   : "text-slate-500 hover:text-slate-700")
               }
             >
@@ -88,7 +102,9 @@ export default function LoginPage() {
                 onChange={(e) => setUsername(e.target.value)}
                 autoFocus
                 required
-                placeholder={isPatient ? "e.g. your portal username" : "staff username"}
+                placeholder={
+                  isPatient ? "e.g. your portal username" : "staff username"
+                }
                 className="w-full rounded-lg border border-slate-300 px-3 py-2.5 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/30"
               />
             </div>
@@ -112,7 +128,11 @@ export default function LoginPage() {
                   tabIndex={-1}
                   aria-label={showPw ? "Hide password" : "Show password"}
                 >
-                  {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showPw ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
                 </button>
               </div>
             </div>
@@ -145,7 +165,10 @@ export default function LoginPage() {
           {isPatient ? (
             <p className="mt-6 text-center text-sm text-slate-500">
               New patient?{" "}
-              <Link to="/register" className="font-medium text-teal-700 hover:underline">
+              <Link
+                to="/register"
+                className="font-medium text-teal-700 hover:underline"
+              >
                 Register here
               </Link>
             </p>
@@ -156,9 +179,6 @@ export default function LoginPage() {
           )}
         </div>
       </div>
-
-      {/* right: artwork */}
-      <AuthArtwork />
     </div>
   );
 }
