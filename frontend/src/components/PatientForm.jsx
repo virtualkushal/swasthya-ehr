@@ -2,15 +2,6 @@ import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { ALLERGEN_VOCABULARY, GENDER_OPTIONS } from "../constants";
 
-// Reusable patient demographics + allergy form. Used by both the public
-// self-registration page and the receptionist intake screen. Allergies are a
-// fixed checkbox set (no free text) so the pharmacy safety match stays reliable.
-//
-// Props:
-//   onSubmit(payload) -> Promise    caller performs the actual API call
-//   submitLabel                     text on the submit button
-//   withCredentials                 when true, also collect a username/password
-//                                   so the patient gets a portal login
 export default function PatientForm({
   onSubmit,
   submitLabel = "Register",
@@ -34,8 +25,6 @@ export default function PatientForm({
     setForm((f) => ({ ...f, [field]: value }));
   }
 
-
-  // Toggling an allergen. "None" is mutually exclusive with real allergens.
   function toggleAllergen(item) {
     setAllergies((current) => {
       if (item === "None") return ["None"];
@@ -53,7 +42,6 @@ export default function PatientForm({
     setError("");
     setBusy(true);
     try {
-      // Only include login credentials when this form is collecting them.
       const { username, password, ...demographics } = form;
       const payload = withCredentials
         ? { ...form, allergies }
@@ -61,7 +49,6 @@ export default function PatientForm({
       await onSubmit(payload);
       setForm(empty);
       setAllergies(["None"]);
-
     } catch (err) {
       const detail =
         err?.response?.data && typeof err.response.data === "object"
@@ -78,6 +65,48 @@ export default function PatientForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {/* Login credentials now come first — every patient must set these up */}
+      {withCredentials && (
+        <>
+          <p className="text-sm font-medium text-slate-700">
+            Create your portal login
+          </p>
+          <p className="text-xs text-slate-400 -mt-2">
+            Set a username and password to sign in and view your lab results and
+            medications.
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Username
+              </label>
+              <input
+                className={field}
+                value={form.username}
+                onChange={(e) => update("username", e.target.value)}
+                autoComplete="username"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Password
+              </label>
+              <input
+                type="password"
+                className={field}
+                value={form.password}
+                onChange={(e) => update("password", e.target.value)}
+                autoComplete="new-password"
+                minLength={8}
+                placeholder="Min 8 characters"
+                required
+              />
+            </div>
+          </div>
+        </>
+      )}
+
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">
@@ -175,52 +204,11 @@ export default function PatientForm({
           })}
         </div>
         <p className="text-xs text-slate-400 mt-1">
-          Select “None” if the patient has no known allergies.
+          Select "None" if the patient has no known allergies.
         </p>
       </div>
 
-      {withCredentials && (
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-4">
-          <p className="text-sm font-medium text-slate-700">
-            Create a portal login{" "}
-            <span className="font-normal text-slate-400">(optional)</span>
-          </p>
-          <p className="text-xs text-slate-400 -mt-2">
-            Set a username and password to sign in later and view your lab
-            results and medications. Leave blank to skip.
-          </p>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Username
-              </label>
-              <input
-                className={field}
-                value={form.username}
-                onChange={(e) => update("username", e.target.value)}
-                autoComplete="username"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Password
-              </label>
-              <input
-                type="password"
-                className={field}
-                value={form.password}
-                onChange={(e) => update("password", e.target.value)}
-                autoComplete="new-password"
-                minLength={8}
-                placeholder="Min 8 characters"
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
       {error && (
-
         <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2">
           {error}
         </div>
