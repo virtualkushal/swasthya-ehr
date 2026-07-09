@@ -21,16 +21,28 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from .constants import PrescriptionStatus, RegisteredBy, Role
-from .models import Patient, Prescription
+from .constants import LabOrderStatus, PrescriptionStatus, RegisteredBy, Role
+from .fhir_serializers import (
+    build_everything_bundle,
+    observation_to_fhir,
+    patient_to_fhir,
+)
+from .models import LabObservation, LabOrder, Patient, Prescription
 from .permissions import EnforceStrictRole
 from .serializers import (
+    LabObservationSerializer,
+    LabOrderSerializer,
     LoginSerializer,
     PatientSerializer,
     PrescriptionSerializer,
     StaffCreateSerializer,
     StaffSerializer,
 )
+
+FHIR_CONTENT_TYPE = "application/fhir+json"
+# Roles allowed to read the interoperable FHIR API (PATIENT excluded).
+FHIR_READ_ROLES = [Role.ADMIN, Role.DOCTOR, Role.PHARMACIST, Role.LAB_TECH]
+
 
 Staff = get_user_model()
 
@@ -286,3 +298,155 @@ class PrescriptionFulfillView(APIView):
         prescription.save()
 
         return Response(PrescriptionSerializer(prescription).data)
+
+
+# --------------------------------------------------------------------------- #
+# Laboratory: orders (doctor) + results (lab tech)
+# --------------------------------------------------------------------------- #
+
+
+class LabOrderListCreateView(generics.ListCreateAPIView):
+    """
+    - POST: a DOCTOR requests a test for a patient.
+    - GET: the lab queue. LAB_TECH sees pending orders; DOCTOR sees the orders
+      they made. Supports ?status=PENDING|COMPLETED.
+    """
+
+    serializer_class = LabOrderSerializer
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = [Role.DOCTOR, Role.LAB_TECH]
+
+    def get_queryset(self):
+        qs = LabOrder.objects.select_related("patient", "ordered_by").order_by(
+            "-created_at"
+        )
+        status_param = self.request.query_params.get("status")
+        if status_param:
+            qs = qs.filter(status=status_param)
+        # A lab tech's queue defaults to still-pending work.
+        elif self.request.user.role == Role.LAB_TECH:
+            qs = qs.filter(status=LabOrderStatus.PENDING)
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        if request.user.role != Role.DOCTOR:
+            return Response(
+                {"detail": "Only a doctor can order a lab test."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().create(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        serializer.save(ordered_by=self.request.user)
+
+
+class LabObservationListCreateView(generics.ListCreateAPIView):
+    """
+    - POST: a LAB_TECH enters a result (range-validated in the serializer). If it
+      is linked to an order, that order is flipped to COMPLETED.
+    - GET: results. LAB_TECH + DOCTOR may read; filter by ?patient=<uuid>.
+    """
+
+    serializer_class = LabObservationSerializer
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = [Role.DOCTOR, Role.LAB_TECH]
+
+    def get_queryset(self):
+        qs = LabObservation.objects.select_related(
+            "patient", "entered_by"
+        ).order_by("-created_at")
+        patient_id = self.request.query_params.get("patient")
+        if patient_id:
+            qs = qs.filter(patient_id=patient_id)
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        if request.user.role != Role.LAB_TECH:
+            return Response(
+                {"detail": "Only a lab technician can submit results."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().create(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        with transaction.atomic():
+            observation = serializer.save(entered_by=self.request.user)
+            # Close the linked order, if any.
+            if observation.lab_order_id:
+                order = observation.lab_order
+                order.status = LabOrderStatus.COMPLETED
+                order.save(update_fields=["status", "updated_at"])
+
+
+# --------------------------------------------------------------------------- #
+# FHIR R4 interoperability layer (read-only)
+# --------------------------------------------------------------------------- #
+
+
+class FHIRPatientView(APIView):
+    """GET a single patient as a FHIR R4 `Patient` resource."""
+
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = FHIR_READ_ROLES
+
+    def get(self, request, pk):
+        try:
+            patient = Patient.objects.get(pk=pk)
+        except Patient.DoesNotExist:
+            return Response(
+                {"resourceType": "OperationOutcome", "issue": [{"severity": "error", "code": "not-found"}]},
+                status=status.HTTP_404_NOT_FOUND,
+                content_type=FHIR_CONTENT_TYPE,
+            )
+        return Response(
+            patient_to_fhir(patient), content_type=FHIR_CONTENT_TYPE
+        )
+
+
+class FHIRObservationView(APIView):
+    """GET a single lab result as a FHIR R4 `Observation` resource."""
+
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = FHIR_READ_ROLES
+
+    def get(self, request, pk):
+        try:
+            observation = LabObservation.objects.get(pk=pk)
+        except LabObservation.DoesNotExist:
+            return Response(
+                {"resourceType": "OperationOutcome", "issue": [{"severity": "error", "code": "not-found"}]},
+                status=status.HTTP_404_NOT_FOUND,
+                content_type=FHIR_CONTENT_TYPE,
+            )
+        return Response(
+            observation_to_fhir(observation), content_type=FHIR_CONTENT_TYPE
+        )
+
+
+class FHIRPatientEverythingView(APIView):
+    """
+    GET a FHIR `Bundle` (searchset) with the patient plus all of their
+    observations — the FHIR `$everything` operation.
+    """
+
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = FHIR_READ_ROLES
+
+    def get(self, request, pk):
+        try:
+            patient = Patient.objects.get(pk=pk)
+        except Patient.DoesNotExist:
+            return Response(
+                {"resourceType": "OperationOutcome", "issue": [{"severity": "error", "code": "not-found"}]},
+                status=status.HTTP_404_NOT_FOUND,
+                content_type=FHIR_CONTENT_TYPE,
+            )
+        observations = LabObservation.objects.filter(patient=patient).order_by(
+            "created_at"
+        )
+        bundle = build_everything_bundle(
+            patient, observations, base_url=request.build_absolute_uri("/")
+        )
+        return Response(bundle, content_type=FHIR_CONTENT_TYPE)
+
+

@@ -11,7 +11,17 @@ export const ALLERGEN_VOCABULARY = [
   "None",
 ];
 
+// The three supported lab tests. `value` is the code the API expects;
+// range/unit drive the numeric input hints. Kept in sync with
+// backend/core/constants.py -> LabTest.
+export const LAB_TESTS = [
+  { value: "HEMOGLOBIN", label: "Hemoglobin", unit: "g/dL", min: 0, max: 25 },
+  { value: "WBC", label: "White Blood Cells", unit: "10^3/uL", min: 0, max: 50 },
+  { value: "PLATELETS", label: "Platelets", unit: "10^3/uL", min: 0, max: 1000 },
+];
+
 export const GENDER_OPTIONS = [
+
   { value: "male", label: "Male" },
   { value: "female", label: "Female" },
   { value: "other", label: "Other" },
@@ -24,6 +34,7 @@ export const ROLE_HOME = {
   DOCTOR: "/doctor",
   RECEPTIONIST: "/reception",
   PHARMACIST: "/pharmacy",
-  LAB_TECH: "/",
+  LAB_TECH: "/lab",
   PATIENT: "/",
+
 };

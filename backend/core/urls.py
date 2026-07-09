@@ -43,4 +43,17 @@ urlpatterns = [
         views.PrescriptionFulfillView.as_view(),
         name="prescription_fulfill",
     ),
+    # Laboratory: orders (doctor) + results (lab tech)
+    path(
+        "lab-orders/",
+        views.LabOrderListCreateView.as_view(),
+        name="lab_order_list_create",
+    ),
+    path(
+        "lab-observations/",
+        views.LabObservationListCreateView.as_view(),
+        name="lab_observation_list_create",
+    ),
 ]
+
+
