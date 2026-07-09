@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { Activity, Loader2, LogIn } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { ROLE_HOME } from "../constants";
+
 
 // Staff login screen. On success we route the user to their role's home.
 export default function LoginPage() {
@@ -18,10 +20,10 @@ export default function LoginPage() {
     setBusy(true);
     try {
       const user = await login(username, password);
-      // Route by role. For now only ADMIN has a dedicated screen; others land
-      // on the shared home page until their dashboards are built.
-      if (user.role === "ADMIN") navigate("/admin");
-      else navigate("/");
+      // Route to the signed-in user's role dashboard. Roles without a dedicated
+      // screen (e.g. LAB_TECH for now) fall back to the shared home page.
+      navigate(ROLE_HOME[user.role] || "/");
+
     } catch {
       setError("Invalid username or password.");
     } finally {
@@ -89,7 +91,16 @@ export default function LoginPage() {
             {busy ? "Signing in…" : "Sign in"}
           </button>
         </form>
+
+        <p className="text-center text-sm text-slate-400 mt-6">
+          Are you a patient?{" "}
+          <Link to="/register" className="text-teal-700 hover:underline">
+            Register here
+          </Link>
+        </p>
       </div>
     </div>
   );
 }
+
+

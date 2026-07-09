@@ -1,15 +1,17 @@
 """
 Serializers for SwasthyaEHR.
 
-Part 3 scope: staff management (admin) and JWT login that carries the user's
-role so the frontend can route by role without an extra request.
+Covers: staff management (admin), JWT login carrying the user's role, patient
+registration (self + receptionist), and prescriptions (the drug-allergy safety
+check lives in the view, inside an atomic transaction).
 """
 
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from .constants import Role
+from .constants import ALLERGEN_VOCABULARY, Role
+from .models import Patient, Prescription
 
 Staff = get_user_model()
 
@@ -78,3 +80,85 @@ class LoginSerializer(TokenObtainPairSerializer):
             "role": self.user.role,
         }
         return data
+
+
+class PatientSerializer(serializers.ModelSerializer):
+    """
+    Create/read a patient profile.
+
+    `allergies` is validated against the fixed vocabulary so the safety engine's
+    substring match stays reliable (REQ-004/005). `registered_by` and
+    `hospital_identifier` are set by the server, never trusted from the client.
+    """
+
+    class Meta:
+        model = Patient
+        fields = [
+            "id",
+            "hospital_identifier",
+            "first_name",
+            "last_name",
+            "phone_number",
+            "date_of_birth",
+            "gender",
+            "allergies",
+            "registered_by",
+            "created_at",
+        ]
+        read_only_fields = ["id", "hospital_identifier", "registered_by", "created_at"]
+
+    def validate_allergies(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Allergies must be a list.")
+        allowed = set(ALLERGEN_VOCABULARY)
+        for item in value:
+            if item not in allowed:
+                raise serializers.ValidationError(
+                    f"'{item}' is not an allowed allergen. "
+                    f"Choose from: {', '.join(ALLERGEN_VOCABULARY)}."
+                )
+        # "None" means no allergies; store it as an empty list for clean matching.
+        if value == ["None"]:
+            return []
+        # If "None" is combined with real allergens, drop the "None" token.
+        return [item for item in value if item != "None"]
+
+
+class PrescriptionSerializer(serializers.ModelSerializer):
+    """
+    Read/create a prescription. On create, only patient + medication + dosage
+    are accepted from the client; prescriber, status and safety are handled by
+    the view. Includes a couple of read-only convenience fields for the UI.
+    """
+
+    patient_name = serializers.SerializerMethodField(read_only=True)
+    prescribed_by_name = serializers.CharField(
+        source="prescribed_by.full_name", read_only=True
+    )
+
+    class Meta:
+        model = Prescription
+        fields = [
+            "id",
+            "patient",
+            "patient_name",
+            "medication_name",
+            "dosage_instruction",
+            "status",
+            "prescribed_by",
+            "prescribed_by_name",
+            "fulfilled_by",
+            "fulfilled_at",
+            "created_at",
+        ]
+        read_only_fields = [
+            "id",
+            "status",
+            "prescribed_by",
+            "fulfilled_by",
+            "fulfilled_at",
+            "created_at",
+        ]
+
+    def get_patient_name(self, obj):
+        return f"{obj.patient.first_name} {obj.patient.last_name}"
