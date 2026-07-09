@@ -36,10 +36,15 @@ DEMO_PASSWORD = "demo12345"
 # username, full name, role
 DEMO_STAFF = [
     ("admin", "System Administrator", Role.ADMIN),
-    ("reception", "Front Desk Receptionist", Role.RECEPTIONIST),
+    ("reception", "Front Desk Receptionist Gita", Role.RECEPTIONIST),
+    ("reception2", "Receptionist Kabita Rai", Role.RECEPTIONIST),
     ("doctor", "Dr. Anjali Sharma", Role.DOCTOR),
+    ("doctor2", "Dr. Bikram Thapa", Role.DOCTOR),
+    ("doctor3", "Dr. Sabina Gurung", Role.DOCTOR),
     ("labtech", "Lab Technician Bikash", Role.LAB_TECH),
+    ("labtech2", "Lab Technician Prakash", Role.LAB_TECH),
     ("pharmacist", "Pharmacist Rojina", Role.PHARMACIST),
+    ("pharmacist2", "Pharmacist Manish", Role.PHARMACIST),
 ]
 
 # first, last, phone, dob, gender, allergies, registered_by, portal_username
@@ -54,7 +59,40 @@ DEMO_PATIENTS = [
         "Sita", "Kumari", "+977-9803000002", date(1988, 11, 23),
         Gender.FEMALE, ["None"], RegisteredBy.RECEPTIONIST, None,
     ),
+    (
+        "Hari", "Prasad", "+977-9841000003", date(1979, 2, 3),
+        Gender.MALE, ["Aspirin", "NSAIDs"], RegisteredBy.RECEPTIONIST, None,
+    ),
+    (
+        "Gita", "Devi", "+977-9803000004", date(2001, 7, 19),
+        Gender.FEMALE, ["Sulfa Drugs"], RegisteredBy.SELF, "gita",
+    ),
+    (
+        "Bishnu", "Karki", "+977-9841000005", date(1965, 12, 30),
+        Gender.MALE, ["None"], RegisteredBy.RECEPTIONIST, None,
+    ),
+    (
+        "Sunita", "Rai", "+977-9803000006", date(1990, 9, 8),
+        Gender.FEMALE, ["Penicillin", "Anticonvulsants"], RegisteredBy.SELF, "sunita",
+    ),
+    (
+        "Kamal", "Shrestha", "+977-9841000007", date(1985, 4, 25),
+        Gender.MALE, ["NSAIDs"], RegisteredBy.RECEPTIONIST, None,
+    ),
+    (
+        "Puja", "Tamang", "+977-9803000008", date(1998, 11, 2),
+        Gender.FEMALE, ["None"], RegisteredBy.SELF, None,
+    ),
+    (
+        "Dipesh", "Magar", "+977-9841000009", date(1973, 6, 14),
+        Gender.MALE, ["Aspirin"], RegisteredBy.RECEPTIONIST, None,
+    ),
+    (
+        "Anita", "Chaudhary", "+977-9803000010", date(2004, 1, 27),
+        Gender.FEMALE, ["Sulfa Drugs", "Penicillin"], RegisteredBy.SELF, "anita",
+    ),
 ]
+
 
 
 
