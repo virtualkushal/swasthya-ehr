@@ -27,6 +27,12 @@ urlpatterns = [
         views.PatientDetailView.as_view(),
         name="patient_detail",
     ),
+    path(
+        "patients/<uuid:pk>/timeline/",
+        views.PatientTimelineView.as_view(),
+        name="patient_timeline",
+    ),
+
     # Prescriptions (safety interceptor + pharmacy queue)
     path(
         "prescriptions/",

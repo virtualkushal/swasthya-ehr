@@ -186,6 +186,60 @@ class PatientDetailView(generics.RetrieveAPIView):
     allowed_roles = [Role.DOCTOR, Role.PHARMACIST, Role.RECEPTIONIST]
 
 
+class PatientTimelineView(APIView):
+    """
+    DOCTOR-only clinical cockpit data for one patient: the profile, the full
+    prescription history, all lab results, and a per-test series prepared for
+    plotting lab trends over time.
+    """
+
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = [Role.DOCTOR]
+
+    def get(self, request, pk):
+        try:
+            patient = Patient.objects.get(pk=pk)
+        except Patient.DoesNotExist:
+            return Response(
+                {"detail": "Patient not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        observations = LabObservation.objects.filter(patient=patient).order_by(
+            "created_at"
+        )
+        prescriptions = Prescription.objects.filter(patient=patient).order_by(
+            "-created_at"
+        )
+
+        # Group observations by test into time-ordered series for the charts.
+        trends = {}
+        for obs in observations:
+            trends.setdefault(
+                obs.test_name,
+                {"test_name": obs.test_name, "unit": obs.result_unit, "points": []},
+            )
+            trends[obs.test_name]["unit"] = obs.result_unit
+            trends[obs.test_name]["points"].append(
+                {
+                    "date": obs.created_at.isoformat(),
+                    "value": float(obs.result_value),
+                }
+            )
+
+        return Response(
+            {
+                "patient": PatientSerializer(patient).data,
+                "prescriptions": PrescriptionSerializer(prescriptions, many=True).data,
+                "observations": LabObservationSerializer(
+                    observations, many=True
+                ).data,
+                "trends": list(trends.values()),
+            }
+        )
+
+
+
 # --------------------------------------------------------------------------- #
 # Prescriptions: the Clinical Safety Interceptor
 # --------------------------------------------------------------------------- #

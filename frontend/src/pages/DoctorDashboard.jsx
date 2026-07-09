@@ -10,7 +10,9 @@ import {
 import api from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import DashboardHeader from "../components/DashboardHeader";
+import TrendChart from "../components/TrendChart";
 import { LAB_TESTS } from "../constants";
+
 
 
 // Doctor cockpit: pick a patient, see their allergies, and write a
@@ -37,9 +39,10 @@ export default function DoctorDashboard() {
     <div className="min-h-screen bg-slate-50">
       <DashboardHeader user={user} logout={logout} subtitle="Consultation room" />
 
-      <main className="max-w-4xl mx-auto p-6 grid md:grid-cols-2 gap-6">
+      <main className="max-w-6xl mx-auto p-6 grid md:grid-cols-3 gap-6">
         {/* Patient directory */}
-        <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
+        <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 md:col-span-1">
+
           <h2 className="font-semibold text-slate-800 mb-3">Patients</h2>
           <form
             onSubmit={(e) => {
@@ -84,7 +87,7 @@ export default function DoctorDashboard() {
         </section>
 
         {/* Prescription panel */}
-        <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
+        <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 md:col-span-2">
           {selected ? (
             <PrescribePanel patient={selected} />
           ) : (
@@ -94,10 +97,169 @@ export default function DoctorDashboard() {
             </div>
           )}
         </section>
+
+        {/* Clinical timeline + lab-trend charts (full width) */}
+        {selected && (
+          <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 md:col-span-3">
+            <ClinicalTimeline patient={selected} />
+          </section>
+        )}
       </main>
     </div>
   );
 }
+
+// Pulls the patient's full clinical history (prescriptions + lab results) and
+// renders it as a chronological timeline alongside lab-trend charts.
+function ClinicalTimeline({ patient }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError("");
+    api
+      .get(`/v1/patients/${patient.id}/timeline/`)
+      .then((res) => {
+        if (active) setData(res.data);
+      })
+      .catch(() => {
+        if (active) setError("Could not load the patient timeline.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [patient.id]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center gap-2 py-10 text-slate-400">
+        <Loader2 className="w-5 h-5 animate-spin" />
+        Loading clinical timeline…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 px-3 py-2 text-sm">
+        {error}
+      </div>
+    );
+  }
+
+  const trends = data?.trends ?? [];
+  const observations = data?.observations ?? [];
+  const prescriptions = data?.prescriptions ?? [];
+
+  // Merge results + prescriptions into one reverse-chronological event feed.
+  const events = [
+    ...observations.map((o) => ({
+      kind: "lab",
+      date: o.created_at,
+      title: `${o.test_name}: ${o.result_value} ${o.result_unit}`,
+      by: o.entered_by_name,
+    })),
+    ...prescriptions.map((p) => ({
+      kind: "rx",
+      date: p.created_at,
+      title: `${p.medication_name} — ${p.dosage_instruction}`,
+      by: p.prescribed_by_name,
+      status: p.status,
+    })),
+  ].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  const fmt = (iso) => {
+    try {
+      return new Date(iso).toLocaleString(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      });
+    } catch {
+      return iso;
+    }
+  };
+
+  return (
+    <div>
+      <h2 className="font-semibold text-slate-800 mb-4">
+        Clinical timeline — {patient.first_name} {patient.last_name}
+      </h2>
+
+      <div className="grid lg:grid-cols-2 gap-6">
+        {/* Lab-trend charts */}
+        <div>
+          <h3 className="text-sm font-semibold text-slate-600 mb-2">
+            Lab trends
+          </h3>
+          {trends.length === 0 ? (
+            <p className="text-sm text-slate-400 italic py-6 text-center">
+              No lab results recorded yet.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {trends.map((t) => (
+                <TrendChart
+                  key={t.test_name}
+                  label={t.test_name}
+                  unit={t.unit}
+                  points={t.points}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Chronological event feed */}
+        <div>
+          <h3 className="text-sm font-semibold text-slate-600 mb-2">History</h3>
+          {events.length === 0 ? (
+            <p className="text-sm text-slate-400 italic py-6 text-center">
+              No clinical events yet.
+            </p>
+          ) : (
+            <ol className="relative border-l border-slate-200 ml-2 space-y-4">
+              {events.map((ev, i) => (
+                <li key={i} className="ml-4">
+                  <span
+                    className={`absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full ${
+                      ev.kind === "lab" ? "bg-teal-500" : "bg-indigo-500"
+                    }`}
+                  />
+                  <p className="text-xs text-slate-400">{fmt(ev.date)}</p>
+                  <p className="text-sm text-slate-800">
+                    <span
+                      className={`inline-block text-[10px] font-semibold uppercase tracking-wide mr-2 px-1.5 py-0.5 rounded ${
+                        ev.kind === "lab"
+                          ? "bg-teal-50 text-teal-700"
+                          : "bg-indigo-50 text-indigo-700"
+                      }`}
+                    >
+                      {ev.kind === "lab" ? "Lab" : "Rx"}
+                    </span>
+                    {ev.title}
+                  </p>
+                  {ev.by && (
+                    <p className="text-xs text-slate-400">
+                      by {ev.by}
+                      {ev.status ? ` · ${ev.status}` : ""}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 function PrescribePanel({ patient }) {
   const [medication, setMedication] = useState("");
