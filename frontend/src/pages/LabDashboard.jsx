@@ -8,7 +8,8 @@ import {
 import api from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import DashboardHeader from "../components/DashboardHeader";
-import { LAB_TESTS } from "../constants";
+import { LAB_TESTS, ROLE_THEME } from "../constants";
+
 
 // Lab Technician station: work through the pending order queue and enter a
 // numeric result for each. Results are range-validated by the backend; on
@@ -39,8 +40,9 @@ export default function LabDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className={`min-h-screen bg-gradient-to-b ${ROLE_THEME.LAB_TECH.tint}`}>
       <DashboardHeader user={user} logout={logout} subtitle="Diagnostic lab station" />
+
 
       <main className="max-w-4xl mx-auto p-6 grid md:grid-cols-2 gap-6">
         {/* Pending order queue */}
