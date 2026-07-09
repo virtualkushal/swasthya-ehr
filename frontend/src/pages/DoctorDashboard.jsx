@@ -1,8 +1,17 @@
 import { useEffect, useState } from "react";
-import { Search, ShieldAlert, CheckCircle2, Pill, Loader2 } from "lucide-react";
+import {
+  Search,
+  ShieldAlert,
+  CheckCircle2,
+  Pill,
+  Loader2,
+  FlaskConical,
+} from "lucide-react";
 import api from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import DashboardHeader from "../components/DashboardHeader";
+import { LAB_TESTS } from "../constants";
+
 
 // Doctor cockpit: pick a patient, see their allergies, and write a
 // prescription. If the medication matches a documented allergy, the backend
@@ -218,6 +227,111 @@ function PrescribePanel({ patient }) {
           {busy ? "Verifying safety…" : "Confirm prescription"}
         </button>
       </form>
+
+      <div className="mt-6 pt-5 border-t border-slate-100">
+        <OrderLabPanel patient={patient} />
+      </div>
     </div>
   );
 }
+
+function OrderLabPanel({ patient }) {
+  const [testName, setTestName] = useState(LAB_TESTS[0].value);
+  const [priority, setPriority] = useState("ROUTINE");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  useEffect(() => {
+    setTestName(LAB_TESTS[0].value);
+    setPriority("ROUTINE");
+    setError("");
+    setSuccess("");
+  }, [patient.id]);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    setSuccess("");
+    try {
+      await api.post("/v1/lab-orders/", {
+        patient: patient.id,
+        test_name: testName,
+        priority,
+      });
+      const label = LAB_TESTS.find((t) => t.value === testName)?.label;
+      setSuccess(`${label} order sent to the lab queue.`);
+    } catch {
+      setError("Could not send the lab order. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const field =
+    "w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500";
+
+  return (
+    <div>
+      <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2">
+        <FlaskConical className="w-5 h-5 text-teal-600" />
+        Order a lab test
+      </h3>
+
+      {error && (
+        <div className="mb-3 rounded-lg bg-red-50 border border-red-200 text-red-700 px-3 py-2 text-sm">
+          {error}
+        </div>
+      )}
+      {success && (
+        <div className="mb-3 flex items-center gap-2 rounded-lg bg-teal-50 border border-teal-200 text-teal-800 px-3 py-2 text-sm">
+          <CheckCircle2 className="w-5 h-5" />
+          {success}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">
+            Test
+          </label>
+          <select
+            className={field}
+            value={testName}
+            onChange={(e) => setTestName(e.target.value)}
+          >
+            {LAB_TESTS.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label} ({t.unit})
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">
+            Priority
+          </label>
+          <select
+            className={field}
+            value={priority}
+            onChange={(e) => setPriority(e.target.value)}
+          >
+            <option value="ROUTINE">Routine</option>
+            <option value="URGENT">Urgent</option>
+          </select>
+        </div>
+        <button
+          type="submit"
+          disabled={busy}
+          className="w-full flex items-center justify-center gap-2 bg-white border border-teal-600 text-teal-700 hover:bg-teal-50 disabled:opacity-60 font-medium rounded-lg px-4 py-2.5"
+        >
+          {busy && <Loader2 className="w-5 h-5 animate-spin" />}
+          {busy ? "Sending…" : "Send to lab"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+

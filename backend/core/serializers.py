@@ -10,8 +10,9 @@ from django.contrib.auth import get_user_model
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from .constants import ALLERGEN_VOCABULARY, Role
-from .models import Patient, Prescription
+from .constants import ALLERGEN_VOCABULARY, LabTest, Role
+from .models import LabObservation, LabOrder, Patient, Prescription
+
 
 Staff = get_user_model()
 
@@ -162,3 +163,112 @@ class PrescriptionSerializer(serializers.ModelSerializer):
 
     def get_patient_name(self, obj):
         return f"{obj.patient.first_name} {obj.patient.last_name}"
+
+
+class LabOrderSerializer(serializers.ModelSerializer):
+    """
+    Read/create a lab order (a doctor's request for a test).
+
+    On create only patient + test_name are accepted; loinc_code is derived by
+    the model, and ordered_by is stamped from the authenticated user in the
+    view. `test_name` must be one of the three supported tests.
+    """
+
+    patient_name = serializers.SerializerMethodField(read_only=True)
+    ordered_by_name = serializers.CharField(
+        source="ordered_by.full_name", read_only=True
+    )
+
+    class Meta:
+        model = LabOrder
+        fields = [
+            "id",
+            "patient",
+            "patient_name",
+            "test_name",
+            "loinc_code",
+            "status",
+            "priority",
+            "ordered_by",
+            "ordered_by_name",
+            "created_at",
+        ]
+        read_only_fields = [
+            "id",
+            "loinc_code",
+            "status",
+            "ordered_by",
+            "created_at",
+        ]
+
+    def get_patient_name(self, obj):
+        return f"{obj.patient.first_name} {obj.patient.last_name}"
+
+
+class LabObservationSerializer(serializers.ModelSerializer):
+    """
+    Read/create a lab result entered by a lab technician.
+
+    Enforces REQ-008/009: `test_name` must be supported, and `result_value`
+    must be a number inside the test's valid clinical range. loinc_code and
+    result_unit are derived by the model; entered_by is stamped in the view.
+    """
+
+    patient_name = serializers.SerializerMethodField(read_only=True)
+    entered_by_name = serializers.CharField(
+        source="entered_by.full_name", read_only=True
+    )
+
+    class Meta:
+        model = LabObservation
+        fields = [
+            "id",
+            "patient",
+            "lab_order",
+            "test_name",
+            "loinc_code",
+            "result_value",
+            "result_unit",
+            "patient_name",
+            "entered_by",
+            "entered_by_name",
+            "created_at",
+        ]
+        read_only_fields = [
+            "id",
+            "loinc_code",
+            "result_unit",
+            "entered_by",
+            "created_at",
+        ]
+
+    def get_patient_name(self, obj):
+        return f"{obj.patient.first_name} {obj.patient.last_name}"
+
+    def validate_test_name(self, value):
+        if value not in LabTest.REFERENCE:
+            raise serializers.ValidationError(
+                f"'{value}' is not a supported test. "
+                f"Choose from: {', '.join(LabTest.REFERENCE)}."
+            )
+        return value
+
+    def validate(self, attrs):
+        """Cross-field check: result_value must sit inside the test's range."""
+        test_name = attrs.get("test_name")
+        result_value = attrs.get("result_value")
+        ref = LabTest.REFERENCE.get(test_name)
+        if ref and result_value is not None:
+            value = float(result_value)
+            if value < ref["min"] or value > ref["max"]:
+                raise serializers.ValidationError(
+                    {
+                        "result_value": (
+                            f"{value} is outside the valid range for "
+                            f"{test_name} ({ref['min']}–{ref['max']} {ref['unit']})."
+                        )
+                    }
+                )
+        return attrs
+
+

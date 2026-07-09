@@ -1,3 +1,4 @@
+
 import { Routes, Route } from "react-router-dom";
 import ProtectedRoute from "./components/ProtectedRoute";
 import LoginPage from "./pages/LoginPage";
@@ -7,6 +8,8 @@ import AdminDashboard from "./pages/AdminDashboard";
 import ReceptionDashboard from "./pages/ReceptionDashboard";
 import DoctorDashboard from "./pages/DoctorDashboard";
 import PharmacyDashboard from "./pages/PharmacyDashboard";
+import LabDashboard from "./pages/LabDashboard";
+
 
 // App routing.
 // Public: /login and /register (patient self-registration).
@@ -61,6 +64,16 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+
+      <Route
+        path="/lab"
+        element={
+          <ProtectedRoute roles={["LAB_TECH"]}>
+            <LabDashboard />
+          </ProtectedRoute>
+        }
+      />
     </Routes>
+
   );
 }
