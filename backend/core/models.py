@@ -68,7 +68,18 @@ class Staff(AbstractUser):
 class Patient(TimeStampedUUIDModel):
     """Patient demographics + allergy list (JSONB)."""
 
+    # Optional login account (role=PATIENT) so a self-registered patient can sign
+    # in to the read-only portal. Receptionist walk-in patients may have no login,
+    # so this is nullable.
+    user = models.OneToOneField(
+        "Staff",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="patient_profile",
+    )
     hospital_identifier = models.CharField(max_length=20, unique=True, editable=False)
+
     first_name = models.CharField(max_length=100)
     last_name = models.CharField(max_length=100)
     phone_number = models.CharField(max_length=20)

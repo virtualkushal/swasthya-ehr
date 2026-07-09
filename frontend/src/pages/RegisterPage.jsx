@@ -39,6 +39,20 @@ export default function RegisterPage() {
             <p className="mt-3 text-2xl font-mono font-semibold text-teal-700">
               {done.hospital_identifier}
             </p>
+            {done.has_login ? (
+              <p className="text-slate-600 mt-4 text-sm">
+                Your portal login is ready.{" "}
+                <Link to="/login" className="text-teal-700 hover:underline">
+                  Sign in
+                </Link>{" "}
+                to view your lab results and medications.
+              </p>
+            ) : (
+              <p className="text-slate-400 mt-4 text-xs">
+                Tip: register with a username &amp; password next time to access
+                your online patient portal.
+              </p>
+            )}
             <button
               onClick={() => setDone(null)}
               className="mt-6 text-sm text-teal-700 hover:underline"
@@ -50,17 +64,23 @@ export default function RegisterPage() {
           <>
             <p className="text-sm text-slate-500 mb-5">
               Fill in your details below. You will get a hospital ID to present
-              at reception.
+              at reception, and you can optionally create a login to view your
+              records online.
             </p>
-            <PatientForm onSubmit={handleSubmit} submitLabel="Register" />
+            <PatientForm
+              onSubmit={handleSubmit}
+              submitLabel="Register"
+              withCredentials
+            />
             <p className="text-center text-sm text-slate-400 mt-6">
-              Hospital staff?{" "}
+              Already registered or hospital staff?{" "}
               <Link to="/login" className="text-teal-700 hover:underline">
                 Sign in
               </Link>
             </p>
           </>
         )}
+
       </div>
     </div>
   );

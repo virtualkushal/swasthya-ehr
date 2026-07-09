@@ -35,6 +35,7 @@ export const ROLE_HOME = {
   RECEPTIONIST: "/reception",
   PHARMACIST: "/pharmacy",
   LAB_TECH: "/lab",
-  PATIENT: "/",
-
+  PATIENT: "/portal",
 };
+
+

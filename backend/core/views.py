@@ -126,13 +126,35 @@ class PatientSelfRegisterView(generics.CreateAPIView):
     Public self-registration (REQ-001). No auth required: a patient fills the
     web form from home before their appointment. `registered_by` is stamped
     SELF by the server.
+
+    If the form includes a username + password, we also create a linked login
+    account (role PATIENT) so the patient can sign in to the read-only portal.
+    The whole thing runs in one atomic transaction so we never end up with a
+    half-created account.
     """
 
     permission_classes = [AllowAny]
     serializer_class = PatientSerializer
 
     def perform_create(self, serializer):
-        serializer.save(registered_by=RegisteredBy.SELF)
+        username = (serializer.validated_data.pop("username", "") or "").strip()
+        password = serializer.validated_data.pop("password", "") or ""
+
+        with transaction.atomic():
+            user = None
+            if username and password:
+                user = Staff(
+                    username=username,
+                    full_name=(
+                        f"{serializer.validated_data.get('first_name', '')} "
+                        f"{serializer.validated_data.get('last_name', '')}"
+                    ).strip(),
+                    role=Role.PATIENT,
+                )
+                user.set_password(password)
+                user.save()
+            serializer.save(registered_by=RegisteredBy.SELF, user=user)
+
 
 
 class PatientListCreateView(generics.ListCreateAPIView):
@@ -240,9 +262,64 @@ class PatientTimelineView(APIView):
 
 
 
+class PatientPortalView(APIView):
+    """
+    PATIENT-only read-only portal (REQ personas 2.1/2.5).
+
+    Returns the signed-in patient's OWN profile, finalized lab observations, and
+    active/past medications. Scoping is by the linked user account, so a patient
+    can never see anyone else's rows even by guessing an id.
+    """
+
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = [Role.PATIENT]
+
+    def get(self, request):
+        patient = Patient.objects.filter(user=request.user).first()
+        if patient is None:
+            return Response(
+                {"detail": "No patient profile is linked to this account."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        observations = LabObservation.objects.filter(patient=patient).order_by(
+            "created_at"
+        )
+        prescriptions = Prescription.objects.filter(patient=patient).order_by(
+            "-created_at"
+        )
+
+        # Per-test time-ordered series so the portal can chart trends too.
+        trends = {}
+        for obs in observations:
+            trends.setdefault(
+                obs.test_name,
+                {"test_name": obs.test_name, "unit": obs.result_unit, "points": []},
+            )
+            trends[obs.test_name]["unit"] = obs.result_unit
+            trends[obs.test_name]["points"].append(
+                {
+                    "date": obs.created_at.isoformat(),
+                    "value": float(obs.result_value),
+                }
+            )
+
+        return Response(
+            {
+                "patient": PatientSerializer(patient).data,
+                "observations": LabObservationSerializer(
+                    observations, many=True
+                ).data,
+                "prescriptions": PrescriptionSerializer(prescriptions, many=True).data,
+                "trends": list(trends.values()),
+            }
+        )
+
+
 # --------------------------------------------------------------------------- #
 # Prescriptions: the Clinical Safety Interceptor
 # --------------------------------------------------------------------------- #
+
 
 
 class PrescriptionCreateView(generics.CreateAPIView):
