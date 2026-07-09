@@ -11,7 +11,8 @@ import api from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import DashboardHeader from "../components/DashboardHeader";
 import TrendChart from "../components/TrendChart";
-import { LAB_TESTS } from "../constants";
+import { LAB_TESTS, ROLE_THEME } from "../constants";
+
 
 
 
@@ -36,8 +37,9 @@ export default function DoctorDashboard() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className={`min-h-screen bg-gradient-to-b ${ROLE_THEME.DOCTOR.tint}`}>
       <DashboardHeader user={user} logout={logout} subtitle="Consultation room" />
+
 
       <main className="max-w-6xl mx-auto p-6 grid md:grid-cols-3 gap-6">
         {/* Patient directory */}

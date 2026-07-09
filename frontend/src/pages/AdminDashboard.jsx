@@ -1,14 +1,18 @@
 import { useEffect, useState } from "react";
 import {
-  Activity,
-  LogOut,
   UserPlus,
   Loader2,
   ShieldCheck,
   ShieldOff,
+  Users,
 } from "lucide-react";
 import api from "../services/api";
 import { useAuth } from "../context/AuthContext";
+import DashboardHeader from "../components/DashboardHeader";
+import StatCard from "../components/StatCard";
+import { ROLE_THEME } from "../constants";
+
+
 
 const ROLES = ["RECEPTIONIST", "DOCTOR", "LAB_TECH", "PHARMACIST", "ADMIN"];
 
@@ -72,35 +76,23 @@ export default function AdminDashboard() {
     await loadStaff();
   }
 
+  const activeCount = staff.filter((m) => m.is_active).length;
+  const doctorCount = staff.filter((m) => m.role === "DOCTOR").length;
+
   return (
-    <div className="min-h-screen bg-slate-50">
-      {/* Top bar */}
-      <header className="bg-white border-b border-slate-200">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-teal-100 rounded-lg">
-              <Activity className="w-6 h-6 text-teal-700" />
-            </div>
-            <div>
-              <h1 className="text-lg font-semibold text-slate-800">
-                SwasthyaEHR — Admin
-              </h1>
-              <p className="text-xs text-slate-500">
-                Signed in as {user?.full_name} ({user?.role})
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={logout}
-            className="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900"
-          >
-            <LogOut className="w-4 h-4" />
-            Sign out
-          </button>
+    <div className={`min-h-screen bg-gradient-to-b ${ROLE_THEME.ADMIN.tint}`}>
+      <DashboardHeader user={user} logout={logout} subtitle="Staff & access control" />
+
+      <div className="mx-auto max-w-6xl px-6 pt-6">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+          <StatCard icon={Users} label="Total staff" value={staff.length} tone="slate" />
+          <StatCard icon={ShieldCheck} label="Active" value={activeCount} tone="emerald" />
+          <StatCard icon={UserPlus} label="Doctors" value={doctorCount} tone="blue" />
         </div>
-      </header>
+      </div>
 
       <main className="max-w-6xl mx-auto px-6 py-8 grid gap-8 lg:grid-cols-3">
+
         {/* Create staff form */}
         <section className="lg:col-span-1">
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
