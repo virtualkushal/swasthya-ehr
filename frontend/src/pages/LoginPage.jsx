@@ -10,7 +10,7 @@ import AuthArtwork from "../components/AuthArtwork";
 // framing (both audiences use the same login endpoint) — patients get a
 // "register" link, staff get a note that accounts are admin-provisioned.
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, logout } = useAuth();
   const navigate = useNavigate();
   const [mode, setMode] = useState("patient"); // "patient" | "staff"
   const [username, setUsername] = useState("");
@@ -25,6 +25,23 @@ export default function LoginPage() {
     setBusy(true);
     try {
       const user = await login(username, password);
+
+      const isStaffAccount = user.role !== "PATIENT";
+      if (mode === "patient" && isStaffAccount) {
+        logout();
+        setError(
+          "This is a staff account. Switch to the Staff tab to sign in.",
+        );
+        return;
+      }
+      if (mode === "staff" && !isStaffAccount) {
+        logout();
+        setError(
+          "This is a patient account. Switch to the Patient tab to sign in.",
+        );
+        return;
+      }
+
       navigate(ROLE_HOME[user.role] || "/");
     } catch {
       setError("Invalid username or password.");
