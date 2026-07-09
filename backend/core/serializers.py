@@ -91,8 +91,8 @@ class PatientSerializer(serializers.ModelSerializer):
     substring match stays reliable (REQ-004/005). `registered_by` and
     `hospital_identifier` are set by the server, never trusted from the client.
 
-    Optional `username`/`password` (write-only) let a self-registering patient
-    create a login for the read-only portal. When provided, the view creates a
+     `username`/`password` (write-only) let a self-registering patient
+    create a login for the read-only portal , The view creates a
     linked Staff account with role PATIENT.
     """
 
@@ -240,6 +240,41 @@ class LabOrderSerializer(serializers.ModelSerializer):
     def get_patient_name(self, obj):
         return f"{obj.patient.first_name} {obj.patient.last_name}"
 
+
+class PatientSelfRegistrationSerializer(PatientSerializer):
+    """
+    Self-registration serializer - credentials are MANDATORY.
+    Extends PatientSerializer but enforces username/password.
+    """
+    username = serializers.CharField(
+        write_only=True, 
+        required=True,
+        min_length=3
+    )
+    password = serializers.CharField(
+        write_only=True, 
+        required=True,
+        min_length=8
+    )
+    
+    def validate(self, attrs):
+        """Enforce username and password are provided and unique."""
+        username = (attrs.get("username") or "").strip()
+        password = attrs.get("password") or ""
+        
+        if not username:
+            raise serializers.ValidationError(
+                {"username": "Username is required."}
+            )
+        if not password:
+            raise serializers.ValidationError(
+                {"password": "Password is required."}
+            )
+        if Staff.objects.filter(username=username).exists():
+            raise serializers.ValidationError(
+                {"username": "That username is already taken."}
+            )
+        return attrs
 
 class LabObservationSerializer(serializers.ModelSerializer):
     """
