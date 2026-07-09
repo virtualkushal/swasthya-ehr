@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Activity, CheckCircle2 } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import api from "../services/api";
 import PatientForm from "../components/PatientForm";
+import BrandMark from "../components/BrandMark";
+import AuthArtwork from "../components/AuthArtwork";
 
 // Public self-registration (REQ-001). No login required — a patient fills this
 // from home before their appointment and receives a hospital identifier.
@@ -15,73 +17,76 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-      <div className="w-full max-w-lg bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="p-2 bg-teal-100 rounded-lg">
-            <Activity className="w-6 h-6 text-teal-700" />
+    <div className="grid min-h-screen lg:grid-cols-2">
+      {/* left: form */}
+      <div className="flex items-center justify-center bg-slate-50 p-6 sm:p-10">
+        <div className="w-full max-w-lg">
+          <div className="mb-8">
+            <BrandMark subtitle="Patient self-registration" />
           </div>
-          <div>
-            <h1 className="text-xl font-semibold text-slate-800">SwasthyaEHR</h1>
-            <p className="text-sm text-slate-500">Patient self-registration</p>
-          </div>
-        </div>
 
-        {done ? (
-          <div className="text-center py-6">
-            <CheckCircle2 className="w-12 h-12 text-teal-600 mx-auto mb-3" />
-            <h2 className="text-lg font-semibold text-slate-800">
-              Registration complete
-            </h2>
-            <p className="text-slate-600 mt-1">
-              Please show this ID at the front desk:
-            </p>
-            <p className="mt-3 text-2xl font-mono font-semibold text-teal-700">
-              {done.hospital_identifier}
-            </p>
-            {done.has_login ? (
-              <p className="text-slate-600 mt-4 text-sm">
-                Your portal login is ready.{" "}
-                <Link to="/login" className="text-teal-700 hover:underline">
+          {done ? (
+            <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+              <CheckCircle2 className="mx-auto mb-3 h-12 w-12 text-teal-600" />
+              <h2 className="text-lg font-semibold text-slate-800">
+                Registration complete
+              </h2>
+              <p className="mt-1 text-slate-600">
+                Please show this ID at the front desk:
+              </p>
+              <p className="mt-3 font-mono text-2xl font-semibold text-teal-700">
+                {done.hospital_identifier}
+              </p>
+              {done.has_login ? (
+                <p className="mt-4 text-sm text-slate-600">
+                  Your portal login is ready.{" "}
+                  <Link to="/login" className="text-teal-700 hover:underline">
+                    Sign in
+                  </Link>{" "}
+                  to view your lab results and medications.
+                </p>
+              ) : (
+                <p className="mt-4 text-xs text-slate-400">
+                  Tip: register with a username &amp; password next time to
+                  access your online patient portal.
+                </p>
+              )}
+              <button
+                onClick={() => setDone(null)}
+                className="mt-6 text-sm text-teal-700 hover:underline"
+              >
+                Register another patient
+              </button>
+            </div>
+          ) : (
+            <>
+              <h2 className="text-2xl font-bold text-slate-800">
+                Create your patient profile
+              </h2>
+              <p className="mb-6 mt-1 text-sm text-slate-500">
+                You'll get a hospital ID to present at reception, and can
+                optionally create a login to view your records online.
+              </p>
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <PatientForm
+                  onSubmit={handleSubmit}
+                  submitLabel="Register"
+                  withCredentials
+                />
+              </div>
+              <p className="mt-6 text-center text-sm text-slate-500">
+                Already registered or hospital staff?{" "}
+                <Link to="/login" className="font-medium text-teal-700 hover:underline">
                   Sign in
-                </Link>{" "}
-                to view your lab results and medications.
+                </Link>
               </p>
-            ) : (
-              <p className="text-slate-400 mt-4 text-xs">
-                Tip: register with a username &amp; password next time to access
-                your online patient portal.
-              </p>
-            )}
-            <button
-              onClick={() => setDone(null)}
-              className="mt-6 text-sm text-teal-700 hover:underline"
-            >
-              Register another patient
-            </button>
-          </div>
-        ) : (
-          <>
-            <p className="text-sm text-slate-500 mb-5">
-              Fill in your details below. You will get a hospital ID to present
-              at reception, and you can optionally create a login to view your
-              records online.
-            </p>
-            <PatientForm
-              onSubmit={handleSubmit}
-              submitLabel="Register"
-              withCredentials
-            />
-            <p className="text-center text-sm text-slate-400 mt-6">
-              Already registered or hospital staff?{" "}
-              <Link to="/login" className="text-teal-700 hover:underline">
-                Sign in
-              </Link>
-            </p>
-          </>
-        )}
-
+            </>
+          )}
+        </div>
       </div>
+
+      {/* right: artwork */}
+      <AuthArtwork />
     </div>
   );
 }
