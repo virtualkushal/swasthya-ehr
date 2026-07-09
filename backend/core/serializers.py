@@ -90,7 +90,17 @@ class PatientSerializer(serializers.ModelSerializer):
     `allergies` is validated against the fixed vocabulary so the safety engine's
     substring match stays reliable (REQ-004/005). `registered_by` and
     `hospital_identifier` are set by the server, never trusted from the client.
+
+    Optional `username`/`password` (write-only) let a self-registering patient
+    create a login for the read-only portal. When provided, the view creates a
+    linked Staff account with role PATIENT.
     """
+
+    username = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    password = serializers.CharField(
+        write_only=True, required=False, allow_blank=True, min_length=8
+    )
+    has_login = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Patient
@@ -104,11 +114,37 @@ class PatientSerializer(serializers.ModelSerializer):
             "gender",
             "allergies",
             "registered_by",
+            "username",
+            "password",
+            "has_login",
             "created_at",
         ]
         read_only_fields = ["id", "hospital_identifier", "registered_by", "created_at"]
 
+    def get_has_login(self, obj):
+        return obj.user_id is not None
+
+    def validate(self, attrs):
+        """If a username is supplied, a password is required and must be unique."""
+        username = (attrs.get("username") or "").strip()
+        password = attrs.get("password") or ""
+        if username or password:
+            if not username:
+                raise serializers.ValidationError(
+                    {"username": "A username is required to create a login."}
+                )
+            if not password:
+                raise serializers.ValidationError(
+                    {"password": "A password is required to create a login."}
+                )
+            if Staff.objects.filter(username=username).exists():
+                raise serializers.ValidationError(
+                    {"username": "That username is already taken."}
+                )
+        return attrs
+
     def validate_allergies(self, value):
+
         if not isinstance(value, list):
             raise serializers.ValidationError("Allergies must be a list.")
         allowed = set(ALLERGEN_VOCABULARY)

@@ -32,8 +32,15 @@ urlpatterns = [
         views.PatientTimelineView.as_view(),
         name="patient_timeline",
     ),
+    # Patient portal (PATIENT reads their own data only)
+    path(
+        "portal/me/",
+        views.PatientPortalView.as_view(),
+        name="patient_portal_me",
+    ),
 
     # Prescriptions (safety interceptor + pharmacy queue)
+
     path(
         "prescriptions/",
         views.PrescriptionCreateView.as_view(),

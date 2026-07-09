@@ -9,6 +9,8 @@ import ReceptionDashboard from "./pages/ReceptionDashboard";
 import DoctorDashboard from "./pages/DoctorDashboard";
 import PharmacyDashboard from "./pages/PharmacyDashboard";
 import LabDashboard from "./pages/LabDashboard";
+import PatientPortal from "./pages/PatientPortal";
+
 
 
 // App routing.
@@ -73,7 +75,17 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+
+      <Route
+        path="/portal"
+        element={
+          <ProtectedRoute roles={["PATIENT"]}>
+            <PatientPortal />
+          </ProtectedRoute>
+        }
+      />
     </Routes>
+
 
   );
 }

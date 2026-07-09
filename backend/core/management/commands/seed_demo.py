@@ -33,17 +33,20 @@ DEMO_STAFF = [
     ("pharmacist", "Pharmacist Rojina", Role.PHARMACIST),
 ]
 
-# first, last, phone, dob, gender, allergies, registered_by
+# first, last, phone, dob, gender, allergies, registered_by, portal_username
+# When portal_username is set, the patient also gets a login (role PATIENT) so
+# you can demo the read-only patient portal.
 DEMO_PATIENTS = [
     (
         "Ram", "Bahadur", "+977-9841000001", date(1994, 5, 12),
-        Gender.MALE, ["Penicillin"], RegisteredBy.SELF,
+        Gender.MALE, ["Penicillin"], RegisteredBy.SELF, "patient",
     ),
     (
         "Sita", "Kumari", "+977-9803000002", date(1988, 11, 23),
-        Gender.FEMALE, ["None"], RegisteredBy.RECEPTIONIST,
+        Gender.FEMALE, ["None"], RegisteredBy.RECEPTIONIST, None,
     ),
 ]
+
 
 
 class Command(BaseCommand):
@@ -73,7 +76,9 @@ class Command(BaseCommand):
                 )
 
         self.stdout.write(self.style.MIGRATE_HEADING("Seeding demo patients..."))
-        for first, last, phone, dob, gender, allergies, reg_by in DEMO_PATIENTS:
+        for (
+            first, last, phone, dob, gender, allergies, reg_by, portal_username
+        ) in DEMO_PATIENTS:
             exists = Patient.objects.filter(
                 first_name=first, last_name=last, phone_number=phone
             ).exists()
@@ -82,7 +87,22 @@ class Command(BaseCommand):
                     self.style.WARNING(f"  = {first} {last} already exists — skipped")
                 )
                 continue
+
+            # Optionally create a linked login (role PATIENT) for the portal.
+            user = None
+            if portal_username and not Staff.objects.filter(
+                username=portal_username
+            ).exists():
+                user = Staff.objects.create(
+                    username=portal_username,
+                    full_name=f"{first} {last}",
+                    role=Role.PATIENT,
+                )
+                user.set_password(DEMO_PASSWORD)
+                user.save()
+
             patient = Patient.objects.create(
+                user=user,
                 first_name=first,
                 last_name=last,
                 phone_number=phone,
@@ -91,10 +111,11 @@ class Command(BaseCommand):
                 allergies=allergies,
                 registered_by=reg_by,
             )
+            login_note = f" [portal login: {portal_username}]" if user else ""
             self.stdout.write(
                 self.style.SUCCESS(
                     f"  + {first} {last} ({patient.hospital_identifier}) "
-                    f"allergies={allergies}"
+                    f"allergies={allergies}{login_note}"
                 )
             )
 
@@ -102,8 +123,16 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("Demo data ready. Log in at /login with:"))
         for username, _full_name, role in DEMO_STAFF:
             self.stdout.write(f"    {username:<11} / {DEMO_PASSWORD}   -> {role}")
+        for *_rest, portal_username in DEMO_PATIENTS:
+            if portal_username:
+                self.stdout.write(
+                    f"    {portal_username:<11} / {DEMO_PASSWORD}   -> {Role.PATIENT}"
+                )
         self.stdout.write("")
         self.stdout.write(
             "Tip: as 'doctor', prescribe 'Penicillin G' to Ram Bahadur to see the "
-            "red safety block; prescribe a safe drug to send it to the pharmacy queue."
+            "red safety block; prescribe a safe drug to send it to the pharmacy queue. "
+            "Log in as 'patient' to see the read-only patient portal."
         )
+
+
