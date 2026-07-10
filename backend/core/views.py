@@ -121,32 +121,38 @@ class StaffDetailView(generics.RetrieveUpdateAPIView):
 # --------------------------------------------------------------------------- #
 
 
-
-
 class PatientSelfRegisterView(generics.CreateAPIView):
     """
-    Public self-registration (REQ-001). No auth required.
-    Username and password are MANDATORY for portal access.
+    Public self-registration (REQ-001). No auth required: a patient fills the
+    web form from home before their appointment. `registered_by` is stamped
+    SELF by the server.
+
+    If the form includes a username + password, we also create a linked login
+    account (role PATIENT) so the patient can sign in to the read-only portal.
+    The whole thing runs in one atomic transaction so we never end up with a
+    half-created account.
     """
+
     permission_classes = [AllowAny]
-    serializer_class = PatientSelfRegistrationSerializer  # <-- Changed this
+    serializer_class = PatientSerializer
 
     def perform_create(self, serializer):
-        # Now we know username/password exist, always create user
-        username = serializer.validated_data.get('username')
-        password = serializer.validated_data.get('password')
-        
+        username = (serializer.validated_data.pop("username", "") or "").strip()
+        password = serializer.validated_data.pop("password", "") or ""
+
         with transaction.atomic():
-            user = Staff(
-                username=username,
-                full_name=(
-                    f"{serializer.validated_data.get('first_name', '')} "
-                    f"{serializer.validated_data.get('last_name', '')}"
-                ).strip(),
-                role=Role.PATIENT,
-            )
-            user.set_password(password)
-            user.save()
+            user = None
+            if username and password:
+                user = Staff(
+                    username=username,
+                    full_name=(
+                        f"{serializer.validated_data.get('first_name', '')} "
+                        f"{serializer.validated_data.get('last_name', '')}"
+                    ).strip(),
+                    role=Role.PATIENT,
+                )
+                user.set_password(password)
+                user.save()
             serializer.save(registered_by=RegisteredBy.SELF, user=user)
 
 

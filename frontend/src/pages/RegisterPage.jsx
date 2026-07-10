@@ -19,9 +19,6 @@ export default function RegisterPage() {
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
       {/* left: form */}
-      <AuthArtwork />
-
-      {/* right: artwork */}
       <div className="flex items-center justify-center bg-slate-50 p-6 sm:p-10">
         <div className="w-full max-w-lg">
           <div className="mb-8">
@@ -67,8 +64,8 @@ export default function RegisterPage() {
                 Create your patient profile
               </h2>
               <p className="mb-6 mt-1 text-sm text-slate-500">
-                You'll get a hospital ID to present at reception, and a login to
-                view your records online.
+                You'll get a hospital ID to present at reception, and can
+                optionally create a login to view your records online.
               </p>
               <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                 <PatientForm
@@ -79,10 +76,7 @@ export default function RegisterPage() {
               </div>
               <p className="mt-6 text-center text-sm text-slate-500">
                 Already registered or hospital staff?{" "}
-                <Link
-                  to="/login"
-                  className="font-medium text-teal-700 hover:underline"
-                >
+                <Link to="/login" className="font-medium text-teal-700 hover:underline">
                   Sign in
                 </Link>
               </p>
@@ -90,6 +84,9 @@ export default function RegisterPage() {
           )}
         </div>
       </div>
+
+      {/* right: artwork */}
+      <AuthArtwork />
     </div>
   );
 }
