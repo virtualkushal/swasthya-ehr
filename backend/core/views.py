@@ -34,7 +34,6 @@ from .serializers import (
     LabOrderSerializer,
     LoginSerializer,
     PatientSerializer,
-    PatientSelfRegistrationSerializer,
     PrescriptionSerializer,
     StaffCreateSerializer,
     StaffSerializer,
