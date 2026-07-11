@@ -90,7 +90,7 @@ DATABASES = {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": os.getenv("DB_NAME", "swasthya"),
         "USER": os.getenv("DB_USER", "postgres"),
-        "PASSWORD": os.getenv("DB_PASSWORD", "20610826"),
+        "PASSWORD": os.getenv("DB_PASSWORD", "minorproject"),
         "HOST": os.getenv("DB_HOST", "localhost"),
         "PORT": os.getenv("DB_PORT", "5432"),
     }
@@ -137,3 +137,6 @@ SIMPLE_JWT = {
 
 # CORS (React dev server)
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
+
+# Email configuration (development - prints to console)
+EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"

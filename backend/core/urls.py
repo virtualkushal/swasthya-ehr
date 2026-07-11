@@ -1,5 +1,9 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
+from core.views import (
+    PasswordResetRequestView,
+    PasswordResetConfirmView,
+)
 
 from . import views
 
@@ -67,6 +71,9 @@ urlpatterns = [
         views.LabObservationListCreateView.as_view(),
         name="lab_observation_list_create",
     ),
+
+    path("auth/password-reset/", PasswordResetRequestView.as_view(), name="password_reset_request"),
+    path("auth/password-reset/confirm/", PasswordResetConfirmView.as_view(), name="password_reset_confirm"),
 ]
 
 

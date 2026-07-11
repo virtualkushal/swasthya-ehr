@@ -10,6 +10,8 @@ import DoctorDashboard from "./pages/DoctorDashboard";
 import PharmacyDashboard from "./pages/PharmacyDashboard";
 import LabDashboard from "./pages/LabDashboard";
 import PatientPortal from "./pages/PatientPortal";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 
 
 
@@ -84,6 +86,15 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/register" element={<RegisterPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password/:uid/:token/" element={<ResetPasswordPage />} />
+
+      {/* Protected routes */}
+      <Route path="/" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
+      {/* ... rest of your routes */}
     </Routes>
 
 
