@@ -9,6 +9,11 @@ check lives in the view, inside an atomic transaction).
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
+from django.utils.encoding import force_bytes, force_str
+from rest_framework.exceptions import ValidationError
+
 
 from .constants import ALLERGEN_VOCABULARY, LabTest, Role
 from .models import LabObservation, LabOrder, Patient, Prescription
@@ -342,4 +347,32 @@ class LabObservationSerializer(serializers.ModelSerializer):
                 )
         return attrs
 
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        # For security, don't reveal if email exists or not
+        # We just return the value – the view will handle the lookup silently
+        return value
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    uid = serializers.CharField()
+    token = serializers.CharField()
+    new_password = serializers.CharField(min_length=8, write_only=True)
+
+    def validate(self, attrs):
+        try:
+            uid = force_str(urlsafe_base64_decode(attrs["uid"]))
+            user = Staff.objects.get(pk=uid, is_active=True)
+        except (Staff.DoesNotExist, ValueError, TypeError, OverflowError):
+            raise ValidationError("Invalid reset link.")
+
+        if not default_token_generator.check_token(user, attrs["token"]):
+            raise ValidationError("Invalid or expired reset link.")
+
+        attrs["user"] = user
+        return attrs
 

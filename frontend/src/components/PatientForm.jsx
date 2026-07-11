@@ -15,6 +15,7 @@ export default function PatientForm({
     gender: "male",
     username: "",
     password: "",
+    email: "",
   };
   const [form, setForm] = useState(empty);
   const [allergies, setAllergies] = useState(["None"]);
