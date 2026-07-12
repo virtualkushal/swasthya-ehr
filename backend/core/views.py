@@ -12,14 +12,20 @@ Covers:
 """
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.tokens import default_token_generator
+from django.core.mail import send_mail
 from django.db import transaction
 from django.utils import timezone
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
 from rest_framework import generics, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
+
+from .serializers import PasswordResetRequestSerializer, PasswordResetConfirmSerializer
 
 from .constants import LabOrderStatus, PrescriptionStatus, RegisteredBy, Role
 from .fhir_serializers import (
@@ -137,6 +143,7 @@ class PatientSelfRegisterView(generics.CreateAPIView):
     serializer_class = PatientSerializer
 
     def perform_create(self, serializer):
+<<<<<<< HEAD
         username = (serializer.validated_data.pop("username", "") or "").strip()
         password = serializer.validated_data.pop("password", "") or ""
 
@@ -153,6 +160,25 @@ class PatientSelfRegisterView(generics.CreateAPIView):
                 )
                 user.set_password(password)
                 user.save()
+=======
+        # Now we know username/password exist, always create user
+        username = serializer.validated_data.pop('username')
+        password = serializer.validated_data.pop('password')
+        email = serializer.validated_data.pop('email')
+
+        with transaction.atomic():
+            user = Staff(
+                username=username,
+                full_name=(
+                    f"{serializer.validated_data.get('first_name', '')} "
+                    f"{serializer.validated_data.get('last_name', '')}"
+                ).strip(),
+                role=Role.PATIENT,
+                email=email,
+            )
+            user.set_password(password)
+            user.save()
+>>>>>>> develop
             serializer.save(registered_by=RegisteredBy.SELF, user=user)
 
 
@@ -580,4 +606,62 @@ class FHIRPatientEverythingView(APIView):
         )
         return Response(bundle, content_type=FHIR_CONTENT_TYPE)
 
+# ================================================================
+# PASSWORD RESET VIEWS (appended at the bottom)
+# ================================================================
+class PasswordResetRequestView(APIView):
+    """Step 1: User submits email → sends reset link."""
 
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data["email"]
+        user = Staff.objects.filter(email=email, is_active=True).first()
+
+        if user:
+            # Generate token and uid
+            token = default_token_generator.make_token(user)
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+
+            # Build the reset link (points to your frontend)
+            frontend_url = "http://localhost:3000"
+            reset_link = f"{frontend_url}/reset-password/{uid}/{token}/"
+
+            # Send email (prints to console in development)
+            send_mail(
+                subject="Reset Your SwasthyaEHR Password",
+                message=f"Click the link below to reset your password:\n\n{reset_link}",
+                from_email="noreply@swasthya.org.np",
+                recipient_list=[email],
+                fail_silently=False,
+            )
+
+        # Always return a success message (don't reveal if email exists)
+        return Response(
+            {"detail": "If an account exists with this email, a reset link has been sent."},
+            status=status.HTTP_200_OK,
+        )
+
+
+class PasswordResetConfirmView(APIView):
+    """Step 2: User submits new password with uid + token."""
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = serializer.validated_data["user"]
+        new_password = serializer.validated_data["new_password"]
+
+        user.set_password(new_password)
+        user.save()
+
+        return Response(
+            {"detail": "Password has been reset successfully."},
+            status=status.HTTP_200_OK,
+        )
