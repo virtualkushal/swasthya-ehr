@@ -143,7 +143,7 @@ class PatientSelfRegisterView(generics.CreateAPIView):
     serializer_class = PatientSerializer
 
     def perform_create(self, serializer):
-<<<<<<< HEAD
+
         username = (serializer.validated_data.pop("username", "") or "").strip()
         password = serializer.validated_data.pop("password", "") or ""
 
@@ -160,25 +160,7 @@ class PatientSelfRegisterView(generics.CreateAPIView):
                 )
                 user.set_password(password)
                 user.save()
-=======
-        # Now we know username/password exist, always create user
-        username = serializer.validated_data.pop('username')
-        password = serializer.validated_data.pop('password')
-        email = serializer.validated_data.pop('email')
 
-        with transaction.atomic():
-            user = Staff(
-                username=username,
-                full_name=(
-                    f"{serializer.validated_data.get('first_name', '')} "
-                    f"{serializer.validated_data.get('last_name', '')}"
-                ).strip(),
-                role=Role.PATIENT,
-                email=email,
-            )
-            user.set_password(password)
-            user.save()
->>>>>>> develop
             serializer.save(registered_by=RegisteredBy.SELF, user=user)
 
 
