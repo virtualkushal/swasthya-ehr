@@ -8,7 +8,11 @@ import {
   FlaskConical,
   Stethoscope,
   X,
+  FileJson,
+  Download,
+  Copy,
 } from "lucide-react";
+
 
 import api from "../services/api";
 import { useAuth } from "../context/AuthContext";
@@ -201,9 +205,13 @@ function ClinicalTimeline({ patient }) {
 
   return (
     <div>
-      <h2 className="font-semibold text-slate-800 mb-4">
-        Clinical timeline — {patient.first_name} {patient.last_name}
-      </h2>
+      <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+        <h2 className="font-semibold text-slate-800">
+          Clinical timeline — {patient.first_name} {patient.last_name}
+        </h2>
+        <FhirExportButton patient={patient} />
+      </div>
+
 
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Lab-trend charts */}
@@ -748,5 +756,154 @@ function OrderLabPanel({ patient }) {
     </div>
   );
 }
+
+
+// Exports the patient's whole record as a standards-compliant HL7 FHIR R4
+// Bundle by calling the read-only /api/fhir/v1/Patient/<id>/$everything/ route.
+// The doctor can view the JSON, copy it, or download it as a .json file — the
+// same output can be pasted into the official HL7 FHIR validator to prove
+// interoperability.
+function FhirExportButton({ patient }) {
+  const [open, setOpen] = useState(false);
+  const [bundle, setBundle] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  async function handleOpen() {
+    setOpen(true);
+    setLoading(true);
+    setError("");
+    setBundle(null);
+    try {
+      // Note the literal "$everything" operation in the FHIR route.
+      const res = await api.get(
+        `/fhir/v1/Patient/${patient.id}/$everything/`
+      );
+      setBundle(res.data);
+    } catch {
+      setError(
+        "Could not export the FHIR bundle. Please try again."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const pretty = bundle ? JSON.stringify(bundle, null, 2) : "";
+
+  function handleDownload() {
+    const blob = new Blob([pretty], { type: "application/fhir+json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `fhir-${patient.hospital_identifier || patient.id}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(pretty);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard can fail on insecure origins; ignore silently.
+    }
+  }
+
+  const resourceCount = bundle?.entry?.length ?? 0;
+
+  return (
+    <>
+      <button
+        onClick={handleOpen}
+        className="flex items-center gap-2 bg-white border border-indigo-600 text-indigo-700 hover:bg-indigo-50 font-medium rounded-lg px-3 py-2 text-sm"
+        title="Export this patient's record as an HL7 FHIR R4 Bundle"
+      >
+        <FileJson className="w-4 h-4" />
+        Export FHIR
+      </button>
+
+      {open && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setOpen(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <FileJson className="w-5 h-5 text-indigo-600" />
+                <div>
+                  <h3 className="font-semibold text-slate-800">
+                    FHIR R4 export — {patient.first_name} {patient.last_name}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    GET /api/fhir/v1/Patient/{patient.id}/$everything/
+                    {bundle ? ` · ${resourceCount} resources` : ""}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setOpen(false)}
+                className="text-slate-400 hover:text-slate-600"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal body */}
+            <div className="flex-1 overflow-auto p-5">
+              {loading && (
+                <div className="flex items-center justify-center gap-2 py-10 text-slate-400">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Building FHIR bundle…
+                </div>
+              )}
+              {error && (
+                <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 px-3 py-2 text-sm">
+                  {error}
+                </div>
+              )}
+              {bundle && (
+                <pre className="text-xs bg-slate-900 text-slate-100 rounded-lg p-4 overflow-auto whitespace-pre-wrap break-words">
+{pretty}
+                </pre>
+              )}
+            </div>
+
+            {/* Modal footer */}
+            {bundle && (
+              <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-slate-100">
+                <button
+                  onClick={handleCopy}
+                  className="flex items-center gap-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 font-medium rounded-lg px-3 py-2 text-sm"
+                >
+                  <Copy className="w-4 h-4" />
+                  {copied ? "Copied!" : "Copy JSON"}
+                </button>
+                <button
+                  onClick={handleDownload}
+                  className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg px-3 py-2 text-sm"
+                >
+                  <Download className="w-4 h-4" />
+                  Download .json
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 
 
