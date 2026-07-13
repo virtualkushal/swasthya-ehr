@@ -71,6 +71,19 @@ urlpatterns = [
         views.LabObservationListCreateView.as_view(),
         name="lab_observation_list_create",
     ),
+    # Diagnoses: the doctor's problem list (ICD-10 coded)
+    path("icd10/", views.icd10_catalog, name="icd10_catalog"),
+    path(
+        "diagnoses/",
+        views.DiagnosisListCreateView.as_view(),
+        name="diagnosis_list_create",
+    ),
+    path(
+        "diagnoses/<uuid:pk>/resolve/",
+        views.DiagnosisResolveView.as_view(),
+        name="diagnosis_resolve",
+    ),
+
 
     path("auth/password-reset/", PasswordResetRequestView.as_view(), name="password_reset_request"),
     path("auth/password-reset/confirm/", PasswordResetConfirmView.as_view(), name="password_reset_confirm"),

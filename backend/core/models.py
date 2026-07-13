@@ -12,7 +12,9 @@ from django.contrib.postgres.indexes import GinIndex
 from django.db import models, transaction
 
 from .constants import (
+    DiagnosisStatus,
     Gender,
+    ICD10,
     LabOrderPriority,
     LabOrderStatus,
     LabTest,
@@ -20,6 +22,7 @@ from .constants import (
     RegisteredBy,
     Role,
 )
+
 
 
 class TimeStampedUUIDModel(models.Model):
@@ -227,3 +230,46 @@ class Prescription(TimeStampedUUIDModel):
 
     def __str__(self):
         return f"{self.medication_name} for {self.patient} [{self.status}]"
+
+
+class Diagnosis(TimeStampedUUIDModel):
+    """
+    A disease/condition recorded for a patient by a doctor (the "problem list").
+
+    Coded with ICD-10 (WHO standard) so it is consistent and interoperable, and
+    maps cleanly to a FHIR `Condition` resource. The system only RECORDS the
+    doctor's chosen diagnosis — it does not auto-diagnose or predict disease.
+    """
+
+    patient = models.ForeignKey(
+        Patient, on_delete=models.CASCADE, related_name="diagnoses"
+    )
+    diagnosed_by = models.ForeignKey(
+        Staff, on_delete=models.PROTECT, related_name="recorded_diagnoses"
+    )
+    icd10_code = models.CharField(max_length=10, choices=ICD10.CHOICES)
+    # Human-readable name, denormalised from the ICD-10 table for easy display.
+    disease_name = models.CharField(max_length=255, blank=True)
+    clinical_status = models.CharField(
+        max_length=20,
+        choices=DiagnosisStatus.CHOICES,
+        default=DiagnosisStatus.ACTIVE,
+    )
+    onset_date = models.DateField(null=True, blank=True)
+    notes = models.CharField(max_length=1000, blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "core_diagnosis"
+        ordering = ["-created_at"]
+
+    def save(self, *args, **kwargs):
+        # Keep disease_name in sync with the chosen ICD-10 code.
+        if self.icd10_code and not self.disease_name:
+            self.disease_name = ICD10.display(self.icd10_code)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.icd10_code} {self.disease_name} for {self.patient} [{self.clinical_status}]"
+
+

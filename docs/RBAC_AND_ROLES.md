@@ -25,7 +25,12 @@ token does not match the endpoint's rules.
 | **Write prescription** (`/api/v1/prescriptions/`) | ❌ | ❌ | **WRITE** | ❌ | ❌ | ❌ |
 | **View prescriptions** (`/api/v1/prescriptions/`) | ❌ | ❌ | **READ** | ❌ | **READ** | **READ (own)** |
 | **Fulfill prescription** (`/api/v1/prescriptions/<id>/fulfill/`) | ❌ | ❌ | ❌ | ❌ | **WRITE** | ❌ |
+| **ICD-10 catalog** (`/api/v1/icd10/`) | **READ** | **READ** | **READ** | **READ** | **READ** | **READ** |
+| **Record diagnosis** (`/api/v1/diagnoses/`) | ❌ | ❌ | **WRITE** | ❌ | ❌ | ❌ |
+| **View diagnoses** (`/api/v1/diagnoses/?patient=`) | ❌ | ❌ | **READ** | ❌ | ❌ | **READ (own)** |
+| **Resolve diagnosis** (`/api/v1/diagnoses/<id>/resolve/`) | ❌ | ❌ | **WRITE** | ❌ | ❌ | ❌ |
 | **FHIR API** (`/api/fhir/v1/*`) | **READ** | ❌ | **READ** | **READ** | **READ** | ❌ |
+
 
 > "own" = the row is filtered by the authenticated patient's token — a patient can never
 > read another patient's data.
