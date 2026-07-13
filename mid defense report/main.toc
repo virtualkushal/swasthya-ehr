@@ -1,0 +1,50 @@
+\contentsline {chapter}{Acknowledgements}{i}{chapter*.2}%
+\contentsline {chapter}{List of Figures}{iv}{chapter*.2}%
+\contentsline {chapter}{List of Tables}{v}{chapter*.2}%
+\contentsline {chapter}{List of Abbreviations}{vi}{chapter*.3}%
+\contentsline {chapter}{\numberline {1}Introduction}{1}{chapter.4}%
+\contentsline {section}{\numberline {1.1}Project Background and Context}{1}{section.5}%
+\contentsline {section}{\numberline {1.2}Problem Statement}{2}{section.6}%
+\contentsline {section}{\numberline {1.3}Objectives}{3}{section.7}%
+\contentsline {subsection}{\numberline {1.3.1}Specific Objectives}{3}{subsection.8}%
+\contentsline {subsection}{\numberline {1.3.2}General Objective}{3}{subsection.9}%
+\contentsline {section}{\numberline {1.4}Scope}{4}{section.14}%
+\contentsline {chapter}{\numberline {2}Literature Review}{5}{chapter.21}%
+\contentsline {section}{\numberline {2.1}Related Work}{5}{section.22}%
+\contentsline {section}{\numberline {2.2}Related Theory}{6}{section.23}%
+\contentsline {subsection}{\numberline {2.2.1}HL7 FHIR Interoperability Standard}{6}{subsection.24}%
+\contentsline {subsection}{\numberline {2.2.2}Role-Based Access Control (RBAC)}{7}{subsection.29}%
+\contentsline {subsection}{\numberline {2.2.3}Transactional Clinical Safety Logic}{7}{subsection.31}%
+\contentsline {subsection}{\numberline {2.2.4}Standardized Clinical Terminologies}{8}{subsection.35}%
+\contentsline {subsection}{\numberline {2.2.5}Representational State Transfer (REST) Architecture}{9}{subsection.36}%
+\contentsline {subsection}{\numberline {2.2.6}The Django Web Framework}{9}{subsection.37}%
+\contentsline {subsection}{\numberline {2.2.7}Django REST Framework (DRF)}{9}{subsection.38}%
+\contentsline {subsection}{\numberline {2.2.8}The React JavaScript Library}{10}{subsection.39}%
+\contentsline {subsection}{\numberline {2.2.9}Fast Healthcare Interoperability Resources (HL7 FHIR)}{10}{subsection.40}%
+\contentsline {chapter}{\numberline {3}Methodology}{11}{chapter.41}%
+\contentsline {section}{\numberline {3.1}Software Development Model}{11}{section.42}%
+\contentsline {section}{\numberline {3.2}Requirement Analysis}{12}{section.48}%
+\contentsline {subsection}{\numberline {3.2.1}Functional Requirements}{12}{subsection.49}%
+\contentsline {subsection}{\numberline {3.2.2}Non Functional Requirements}{13}{subsection.50}%
+\contentsline {section}{\numberline {3.3}Proposed System Design}{15}{section.51}%
+\contentsline {subsection}{\numberline {3.3.1}System Architecture}{15}{subsection.52}%
+\contentsline {subsection}{\numberline {3.3.2}Use Case Diagram}{17}{subsection.54}%
+\contentsline {subsection}{\numberline {3.3.3}Data Flow Diagram}{18}{subsection.56}%
+\contentsline {subsection}{\numberline {3.3.4}System Flowchart}{21}{subsection.59}%
+\contentsline {section}{\numberline {3.4}Implementation Details}{23}{section.61}%
+\contentsline {subsection}{\numberline {3.4.1}Frontend Development}{23}{subsection.62}%
+\contentsline {subsection}{\numberline {3.4.2}Backend Development}{23}{subsection.64}%
+\contentsline {subsection}{\numberline {3.4.3}Interoperability and Clinical Validation Integration}{24}{subsection.65}%
+\contentsline {subsection}{\numberline {3.4.4}Database Schema}{24}{subsection.66}%
+\contentsline {subsection}{\numberline {3.4.5}Testing Strategy}{25}{subsection.67}%
+\contentsline {chapter}{\numberline {4}Results and Discussion}{26}{chapter.68}%
+\contentsline {section}{\numberline {4.1}Task Completed}{26}{section.69}%
+\contentsline {subsection}{\numberline {4.1.1}Backend System Architecture (Django 5, DRF, and PostgreSQL)}{26}{subsection.70}%
+\contentsline {subsection}{\numberline {4.1.2}Frontend Architecture and Interface Design (React 18, Vite, and Tailwind CSS)}{28}{subsection.71}%
+\contentsline {section}{\numberline {4.2}Task remaining}{29}{section.72}%
+\contentsline {subsection}{\numberline {4.2.1}Expanded Laboratory Diagnostics and LOINC Mapping}{29}{subsection.73}%
+\contentsline {subsection}{\numberline {4.2.2}Expanded FHIR Interoperability Layer}{31}{subsection.75}%
+\contentsline {subsection}{\numberline {4.2.3}Symptom-Based Registration and Deterministic Routing}{31}{subsection.76}%
+\contentsline {subsection}{\numberline {4.2.4}Deterministic Risk Analysis and Clinical Safety Flags}{32}{subsection.77}%
+\contentsline {chapter}{References}{33}{chapter*.78}%
+\contentsline {chapter}{\numberline {5}Appendix}{35}{chapter.79}%
