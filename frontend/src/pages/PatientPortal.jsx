@@ -5,7 +5,9 @@ import {
   FlaskConical,
   Pill,
   Loader2,
+  Stethoscope,
 } from "lucide-react";
+
 import { useAuth } from "../context/AuthContext";
 import api from "../services/api";
 import DashboardHeader from "../components/DashboardHeader";
@@ -197,7 +199,55 @@ export default function PatientPortal() {
                 </p>
               )}
             </section>
+
+            {/* Diagnoses */}
+            <section>
+              <div className="flex items-center gap-2 mb-3">
+                <Stethoscope className="w-5 h-5 text-slate-500" />
+                <h3 className="font-semibold text-slate-800">My diagnoses</h3>
+              </div>
+              {data.diagnoses?.length ? (
+                <ul className="space-y-2">
+                  {data.diagnoses.map((d) => (
+                    <li
+                      key={d.id}
+                      className="bg-white rounded-lg border border-slate-200 p-4 flex items-start justify-between gap-4"
+                    >
+                      <div>
+                        <p className="font-medium text-slate-800">
+                          <span className="font-mono text-xs text-slate-500 mr-2">
+                            {d.icd10_code}
+                          </span>
+                          {d.disease_name}
+                        </p>
+                        <p className="text-xs text-slate-400 mt-1">
+                          Recorded {fmtDateTime(d.created_at)}
+                          {d.diagnosed_by_name
+                            ? ` · by ${d.diagnosed_by_name}`
+                            : ""}
+                          {d.onset_date ? ` · onset ${d.onset_date}` : ""}
+                        </p>
+                      </div>
+                      <span
+                        className={`text-xs font-medium px-2 py-1 rounded-full whitespace-nowrap ${
+                          d.clinical_status === "ACTIVE"
+                            ? "bg-rose-50 text-rose-700"
+                            : "bg-slate-100 text-slate-500"
+                        }`}
+                      >
+                        {d.clinical_status === "ACTIVE" ? "Active" : "Resolved"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-slate-500 bg-white rounded-lg border border-slate-200 p-4">
+                  You have no diagnoses on record.
+                </p>
+              )}
+            </section>
           </>
+
         )}
       </main>
     </div>

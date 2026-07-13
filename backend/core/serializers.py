@@ -15,8 +15,9 @@ from django.utils.encoding import force_bytes, force_str
 from rest_framework.exceptions import ValidationError
 
 
-from .constants import ALLERGEN_VOCABULARY, LabTest, Role
-from .models import LabObservation, LabOrder, Patient, Prescription
+from .constants import ALLERGEN_VOCABULARY, ICD10, LabTest, Role
+from .models import Diagnosis, LabObservation, LabOrder, Patient, Prescription
+
 
 
 Staff = get_user_model()
@@ -313,8 +314,59 @@ class LabObservationSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class DiagnosisSerializer(serializers.ModelSerializer):
+    """
+    Read/create a diagnosis (problem-list entry).
+
+    On create, the client sends `patient` + `icd10_code` (+ optional onset_date
+    / notes). `disease_name` is derived from the ICD-10 table, and `diagnosed_by`
+    is stamped from the authenticated doctor in the view. `clinical_status` is
+    read-only here (resolving is done via a dedicated action).
+    """
+
+    patient_name = serializers.SerializerMethodField(read_only=True)
+    diagnosed_by_name = serializers.CharField(
+        source="diagnosed_by.full_name", read_only=True
+    )
+
+    class Meta:
+        model = Diagnosis
+        fields = [
+            "id",
+            "patient",
+            "patient_name",
+            "icd10_code",
+            "disease_name",
+            "clinical_status",
+            "onset_date",
+            "notes",
+            "diagnosed_by",
+            "diagnosed_by_name",
+            "resolved_at",
+            "created_at",
+        ]
+        read_only_fields = [
+            "id",
+            "disease_name",
+            "clinical_status",
+            "diagnosed_by",
+            "resolved_at",
+            "created_at",
+        ]
+
+    def get_patient_name(self, obj):
+        return f"{obj.patient.first_name} {obj.patient.last_name}"
+
+    def validate_icd10_code(self, value):
+        if not ICD10.is_valid(value):
+            raise serializers.ValidationError(
+                f"'{value}' is not a recognised ICD-10 code in the supported list."
+            )
+        return value
+
 
 class PasswordResetRequestSerializer(serializers.Serializer):
+
     email = serializers.EmailField()
 
     def validate_email(self, value):

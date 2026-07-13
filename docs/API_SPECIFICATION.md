@@ -232,7 +232,67 @@ Authorization: Bearer <json_web_token>
 
 ---
 
+## 7A. Diagnoses (Doctor's ICD-10 Problem List)
+
+The system only **records** a doctor's chosen diagnosis from a curated ICD-10
+list — it never auto-diagnoses. `disease_name` is derived server-side from the
+code.
+
+### 7A.1 Get the ICD-10 catalog
+- **GET** `/api/v1/icd10/`
+- **Access:** any authenticated user (used to populate the searchable dropdown)
+- **Success (200):**
+```json
+{
+  "count": 42,
+  "results": [
+    { "code": "J18.9", "name": "Pneumonia, unspecified" },
+    { "code": "E11.9", "name": "Type 2 diabetes mellitus" }
+  ]
+}
+```
+
+### 7A.2 Record a diagnosis
+- **POST** `/api/v1/diagnoses/`
+- **Access:** `DOCTOR`
+- **Request:** (`onset_date` and `notes` are optional)
+```json
+{
+  "patient": "3a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d",
+  "icd10_code": "J18.9",
+  "onset_date": "2026-07-01",
+  "notes": "Community-acquired; started antibiotics."
+}
+```
+- **Success (201):**
+```json
+{
+  "id": "uuid",
+  "icd10_code": "J18.9",
+  "disease_name": "Pneumonia, unspecified",
+  "clinical_status": "ACTIVE",
+  "diagnosed_by_name": "Dr Gurung"
+}
+```
+- **Failure (400):** `icd10_code` not in the catalog.
+
+### 7A.3 List diagnoses
+- **GET** `/api/v1/diagnoses/?patient=<id>&status=ACTIVE`
+- **Access:** `DOCTOR` (any patient, filterable); `PATIENT` (own only — scoped by
+  the linked account, `patient`/`status` filters ignored for safety)
+- **Success (200):** array newest-first.
+
+### 7A.4 Resolve a diagnosis
+- **POST** `/api/v1/diagnoses/<id>/resolve/`
+- **Access:** `DOCTOR`
+- **Request:** `{}` (the ID is in the URL)
+- **Success (200):** the updated diagnosis with `clinical_status: "RESOLVED"` and
+  a `resolved_at` timestamp.
+
+---
+
 ## 8. FHIR Endpoints (read-only)
+
 
 Documented fully in **FHIR_MAPPING.md**. Summary:
 

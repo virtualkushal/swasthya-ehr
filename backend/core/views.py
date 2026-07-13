@@ -27,15 +27,23 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 
 from .serializers import PasswordResetRequestSerializer, PasswordResetConfirmSerializer
 
-from .constants import LabOrderStatus, PrescriptionStatus, RegisteredBy, Role
+from .constants import (
+    DiagnosisStatus,
+    ICD10,
+    LabOrderStatus,
+    PrescriptionStatus,
+    RegisteredBy,
+    Role,
+)
 from .fhir_serializers import (
     build_everything_bundle,
     observation_to_fhir,
     patient_to_fhir,
 )
-from .models import LabObservation, LabOrder, Patient, Prescription
+from .models import Diagnosis, LabObservation, LabOrder, Patient, Prescription
 from .permissions import EnforceStrictRole
 from .serializers import (
+    DiagnosisSerializer,
     LabObservationSerializer,
     LabOrderSerializer,
     LoginSerializer,
@@ -44,6 +52,7 @@ from .serializers import (
     StaffCreateSerializer,
     StaffSerializer,
 )
+
 
 FHIR_CONTENT_TYPE = "application/fhir+json"
 # Roles allowed to read the interoperable FHIR API (PATIENT excluded).
@@ -241,6 +250,7 @@ class PatientTimelineView(APIView):
         prescriptions = Prescription.objects.filter(patient=patient).order_by(
             "-created_at"
         )
+        diagnoses = Diagnosis.objects.filter(patient=patient).order_by("-created_at")
 
         # Group observations by test into time-ordered series for the charts.
         trends = {}
@@ -264,9 +274,11 @@ class PatientTimelineView(APIView):
                 "observations": LabObservationSerializer(
                     observations, many=True
                 ).data,
+                "diagnoses": DiagnosisSerializer(diagnoses, many=True).data,
                 "trends": list(trends.values()),
             }
         )
+
 
 
 
@@ -296,6 +308,7 @@ class PatientPortalView(APIView):
         prescriptions = Prescription.objects.filter(patient=patient).order_by(
             "-created_at"
         )
+        diagnoses = Diagnosis.objects.filter(patient=patient).order_by("-created_at")
 
         # Per-test time-ordered series so the portal can chart trends too.
         trends = {}
@@ -319,9 +332,11 @@ class PatientPortalView(APIView):
                     observations, many=True
                 ).data,
                 "prescriptions": PrescriptionSerializer(prescriptions, many=True).data,
+                "diagnoses": DiagnosisSerializer(diagnoses, many=True).data,
                 "trends": list(trends.values()),
             }
         )
+
 
 
 # --------------------------------------------------------------------------- #
@@ -518,8 +533,94 @@ class LabObservationListCreateView(generics.ListCreateAPIView):
 
 
 # --------------------------------------------------------------------------- #
+# Diagnoses: the doctor's problem list (ICD-10 coded)
+# --------------------------------------------------------------------------- #
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def icd10_catalog(request):
+    """
+    Return the curated ICD-10 vocabulary so the frontend can render a searchable
+    diagnosis dropdown. Any authenticated staff/patient may read the list.
+    """
+    catalog = [{"code": code, "name": name} for code, name in ICD10.CODES.items()]
+    return Response({"count": len(catalog), "results": catalog})
+
+
+class DiagnosisListCreateView(generics.ListCreateAPIView):
+    """
+    - POST: a DOCTOR records a diagnosis for a patient (ICD-10 coded). The system
+      only STORES the doctor's chosen diagnosis; it never auto-diagnoses.
+    - GET: list diagnoses. DOCTOR may read any (filter with ?patient=<uuid>);
+      a PATIENT reads only their own linked record.
+    """
+
+    serializer_class = DiagnosisSerializer
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = [Role.DOCTOR, Role.PATIENT]
+
+    def get_queryset(self):
+        qs = Diagnosis.objects.select_related(
+            "patient", "diagnosed_by"
+        ).order_by("-created_at")
+
+        if self.request.user.role == Role.PATIENT:
+            # Scope strictly to the patient's own linked profile.
+            return qs.filter(patient__user=self.request.user)
+
+        patient_id = self.request.query_params.get("patient")
+        if patient_id:
+            qs = qs.filter(patient_id=patient_id)
+        status_param = self.request.query_params.get("status")
+        if status_param:
+            qs = qs.filter(clinical_status=status_param)
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        if request.user.role != Role.DOCTOR:
+            return Response(
+                {"detail": "Only a doctor can record a diagnosis."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().create(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        serializer.save(diagnosed_by=self.request.user)
+
+
+class DiagnosisResolveView(APIView):
+    """DOCTOR-only: mark an active diagnosis as resolved."""
+
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = [Role.DOCTOR]
+
+    def post(self, request, pk):
+        try:
+            diagnosis = Diagnosis.objects.get(pk=pk)
+        except Diagnosis.DoesNotExist:
+            return Response(
+                {"detail": "Diagnosis not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if diagnosis.clinical_status == DiagnosisStatus.RESOLVED:
+            return Response(
+                {"detail": "This diagnosis is already resolved."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        diagnosis.clinical_status = DiagnosisStatus.RESOLVED
+        diagnosis.resolved_at = timezone.now()
+        diagnosis.save(update_fields=["clinical_status", "resolved_at", "updated_at"])
+
+        return Response(DiagnosisSerializer(diagnosis).data)
+
+
+# --------------------------------------------------------------------------- #
 # FHIR R4 interoperability layer (read-only)
 # --------------------------------------------------------------------------- #
+
 
 
 class FHIRPatientView(APIView):
