@@ -116,7 +116,12 @@ USE_TZ = True
 # Static files
 STATIC_URL = "static/"
 
+# Media files (uploaded lab report PDFs — future PDF pipeline)
+MEDIA_URL = "media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
 
 
 # Django REST Framework + JWT

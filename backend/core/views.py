@@ -1,20 +1,25 @@
 """
-API views for SwasthyaEHR.
+API views for SwasthyaEHR (v2 — multi-department OPD).
 
-Covers:
-- health check (open)
-- JWT login (open) + "who am I"
-- staff management (ADMIN only)
-- patient registration: self (public) + receptionist (internal)
-- patient directory (DOCTOR / PHARMACIST / RECEPTIONIST)
-- prescriptions: doctor creates (with the atomic drug-allergy safety check),
-  pharmacist views the queue and fulfills.
+Covers: health, email login + change-password, staff self-register + admin
+approval, patient registration + directory + portal, encounters + status queue,
+nurse vitals, lab catalog/orders/reports/results, prescriptions (pharmacy queue),
+ICD-10 diagnoses, the read-only FHIR R4 layer, and cross-hospital sharing
+(request -> patient approval -> FHIR Bundle).
+
+Backend RBAC is enforced by EnforceStrictRole via each view's allowed_roles.
+There is NO blocking drug-allergy interceptor in v2 (allergies are shown to the
+doctor as a red banner instead).
 """
+
+import secrets
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
@@ -25,101 +30,194 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from .serializers import PasswordResetRequestSerializer, PasswordResetConfirmSerializer
-
 from .constants import (
+    AccessRequestStatus,
     DiagnosisStatus,
+    Department,
+    EncounterStatus,
     ICD10,
+    LabCategory,
     LabOrderStatus,
+    LabTestCatalog,
     PrescriptionStatus,
     RegisteredBy,
     Role,
+    StaffStatus,
 )
 from .fhir_serializers import (
     build_everything_bundle,
+    condition_to_fhir,
+    encounter_to_fhir,
+    medicationrequest_to_fhir,
     observation_to_fhir,
     patient_to_fhir,
 )
-from .models import Diagnosis, LabObservation, LabOrder, Patient, Prescription
+from .models import (
+    AccessRequest,
+    Diagnosis,
+    Encounter,
+    LabOrder,
+    LabReport,
+    LabResult,
+    Patient,
+    Prescription,
+    Vitals,
+)
 from .permissions import EnforceStrictRole
 from .serializers import (
+    AccessRequestSerializer,
+    ChangePasswordSerializer,
     DiagnosisSerializer,
-    LabObservationSerializer,
+    EncounterSerializer,
     LabOrderSerializer,
+    LabReportSerializer,
+    LabResultSerializer,
     LoginSerializer,
+    PasswordResetConfirmSerializer,
+    PasswordResetRequestSerializer,
     PatientSerializer,
     PrescriptionSerializer,
     StaffCreateSerializer,
+    StaffRegisterSerializer,
     StaffSerializer,
+    VitalsSerializer,
 )
 
-
 FHIR_CONTENT_TYPE = "application/fhir+json"
-# Roles allowed to read the interoperable FHIR API (PATIENT excluded).
-FHIR_READ_ROLES = [Role.ADMIN, Role.DOCTOR, Role.PHARMACIST, Role.LAB_TECH]
-
+FHIR_READ_ROLES = [Role.ADMIN, Role.DOCTOR, Role.PHARMACIST, Role.LAB_TECH, Role.NURSE]
 
 Staff = get_user_model()
+FRONTEND_URL = "http://localhost:3000"
+
+
+def _fhir_error(msg, code="not-found", http=status.HTTP_404_NOT_FOUND):
+    return Response(
+        {
+            "resourceType": "OperationOutcome",
+            "issue": [{"severity": "error", "code": code, "diagnostics": msg}],
+        },
+        status=http,
+        content_type=FHIR_CONTENT_TYPE,
+    )
+
+
+def _generate_password():
+    return secrets.token_urlsafe(9)
+
+
+def _email_credentials(user, password):
+    """Send login credentials (console backend in dev)."""
+    send_mail(
+        subject="Your SwasthyaEHR account is ready",
+        message=(
+            f"Hello {user.full_name},\n\n"
+            f"Your account has been approved.\n"
+            f"Login email: {user.email}\n"
+            f"Temporary password: {password}\n\n"
+            f"Please sign in at {FRONTEND_URL}/login and change your password.\n"
+        ),
+        from_email="noreply@swasthya.org.np",
+        recipient_list=[user.email],
+        fail_silently=True,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Health & auth
+# --------------------------------------------------------------------------- #
 
 
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def health(request):
-    """Simple liveness check used to confirm the API is reachable."""
     return Response({"status": "ok", "service": "swasthya-ehr-api"})
 
 
 class LoginView(TokenObtainPairView):
-    """POST username + password -> access/refresh tokens + user object."""
-
     permission_classes = [AllowAny]
     serializer_class = LoginSerializer
 
 
 class MeView(APIView):
-    """Return the currently authenticated user's identity."""
-
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        user = request.user
+        u = request.user
         return Response(
             {
-                "id": str(user.id),
-                "username": user.username,
-                "full_name": user.full_name,
-                "role": user.role,
-                "is_active": user.is_active,
+                "id": str(u.id),
+                "email": u.email,
+                "full_name": u.full_name,
+                "role": u.role,
+                "department": u.department,
+                "status": u.status,
+                "must_change_password": u.must_change_password,
+                "is_active": u.is_active,
             }
         )
 
 
-class StaffListCreateView(generics.ListCreateAPIView):
-    """ADMIN-only: list all staff, or create a new staff account."""
+class ChangePasswordView(APIView):
+    permission_classes = [IsAuthenticated]
 
+    def post(self, request):
+        serializer = ChangePasswordSerializer(
+            data=request.data, context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        user = request.user
+        user.set_password(serializer.validated_data["new_password"])
+        user.must_change_password = False
+        user.save(update_fields=["password", "must_change_password", "updated_at"])
+        return Response({"detail": "Password changed successfully."})
+
+
+class StaffRegisterView(generics.CreateAPIView):
+    """Public staff self-registration -> PENDING (cannot log in until approved)."""
+
+    permission_classes = [AllowAny]
+    serializer_class = StaffRegisterSerializer
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        response.data = {
+            "detail": "Registration received. An administrator will review and "
+            "approve your account shortly.",
+            "id": response.data.get("id"),
+        }
+        return response
+
+
+# --------------------------------------------------------------------------- #
+# Staff management + approval (ADMIN)
+# --------------------------------------------------------------------------- #
+
+
+class StaffListCreateView(generics.ListCreateAPIView):
     permission_classes = [EnforceStrictRole]
     allowed_roles = [Role.ADMIN]
-    queryset = Staff.objects.all().order_by("-created_at")
+
+    def get_queryset(self):
+        qs = Staff.objects.all().order_by("-created_at")
+        status_param = self.request.query_params.get("status")
+        role_param = self.request.query_params.get("role")
+        if status_param:
+            qs = qs.filter(status=status_param)
+        if role_param:
+            qs = qs.filter(role=role_param)
+        return qs
 
     def get_serializer_class(self):
-        if self.request.method == "POST":
-            return StaffCreateSerializer
-        return StaffSerializer
+        return StaffCreateSerializer if self.request.method == "POST" else StaffSerializer
 
 
 class StaffDetailView(generics.RetrieveUpdateAPIView):
-    """
-    ADMIN-only: view or update a staff account. The main practical use is
-    deactivating an account (soft delete) by PATCHing is_active=false.
-    """
-
     permission_classes = [EnforceStrictRole]
     allowed_roles = [Role.ADMIN]
     queryset = Staff.objects.all()
     serializer_class = StaffSerializer
 
     def perform_update(self, serializer):
-        # Prevent an admin from deactivating their own account by accident.
         target = self.get_object()
         if (
             target.id == self.request.user.id
@@ -131,80 +229,180 @@ class StaffDetailView(generics.RetrieveUpdateAPIView):
         serializer.save()
 
 
+class StaffApproveView(APIView):
+    """ADMIN approves a PENDING staff account: generate + email a password."""
+
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = [Role.ADMIN]
+
+    def post(self, request, pk):
+        try:
+            staff = Staff.objects.get(pk=pk)
+        except Staff.DoesNotExist:
+            return Response({"detail": "Staff not found."}, status=404)
+        if staff.status == StaffStatus.ACTIVE:
+            return Response({"detail": "Already active."}, status=400)
+
+        password = _generate_password()
+        staff.status = StaffStatus.ACTIVE
+        staff.is_active = True
+        staff.must_change_password = True
+        staff.set_password(password)
+        staff.save()
+        _email_credentials(staff, password)
+        return Response(
+            {"detail": f"{staff.full_name} approved. Credentials emailed."}
+        )
+
+
+class StaffRejectView(APIView):
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = [Role.ADMIN]
+
+    def post(self, request, pk):
+        try:
+            staff = Staff.objects.get(pk=pk)
+        except Staff.DoesNotExist:
+            return Response({"detail": "Staff not found."}, status=404)
+        staff.status = StaffStatus.REJECTED
+        staff.is_active = False
+        staff.save(update_fields=["status", "is_active", "updated_at"])
+        return Response({"detail": f"{staff.full_name} rejected."})
+
+
+class AdminOverviewView(APIView):
+    """ADMIN dashboard summary counts."""
+
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = [Role.ADMIN]
+
+    def get(self, request):
+        return Response(
+            {
+                "patients": Patient.objects.count(),
+                "encounters_open": Encounter.objects.exclude(
+                    status=EncounterStatus.CLOSED
+                ).count(),
+                "staff_active": Staff.objects.filter(
+                    status=StaffStatus.ACTIVE
+                ).count(),
+                "staff_pending": Staff.objects.filter(
+                    status=StaffStatus.PENDING
+                ).count(),
+                "by_role": {
+                    role: Staff.objects.filter(role=role).count()
+                    for role, _ in Role.CHOICES
+                },
+            }
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Reference catalogs (departments, lab tests, ICD-10)
+# --------------------------------------------------------------------------- #
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def departments_catalog(request):
+    return Response(
+        {"results": [{"code": c, "name": n} for c, n in Department.CHOICES]}
+    )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def lab_catalog(request):
+    """The orderable lab test catalog, optionally filtered by ?department=."""
+    dept = request.query_params.get("department")
+    tests = LabTestCatalog.for_department(dept) if dept else LabTestCatalog.TESTS
+    results = [
+        {
+            "code": code,
+            "name": meta["name"],
+            "category": meta["category"],
+            "type": meta["type"],
+            "loinc": meta.get("loinc", ""),
+            "unit": meta.get("unit", ""),
+            "reference_low": meta.get("low"),
+            "reference_high": meta.get("high"),
+        }
+        for code, meta in tests.items()
+    ]
+    return Response({"count": len(results), "results": results})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def icd10_catalog(request):
+    """ICD-10 vocabulary, optionally filtered by ?department=."""
+    dept = request.query_params.get("department")
+    entries = ICD10.for_department(dept) if dept else ICD10.ENTRIES
+    results = [
+        {"code": code, "name": meta["name"], "department": meta["dept"]}
+        for code, meta in entries.items()
+    ]
+    return Response({"count": len(results), "results": results})
+
+
 # --------------------------------------------------------------------------- #
 # Patient registration & directory
 # --------------------------------------------------------------------------- #
 
 
 class PatientSelfRegisterView(generics.CreateAPIView):
-    """
-    Public self-registration (REQ-001). No auth required: a patient fills the
-    web form from home before their appointment. `registered_by` is stamped
-    SELF by the server.
-
-    If the form includes a username + password, we also create a linked login
-    account (role PATIENT) so the patient can sign in to the read-only portal.
-    The whole thing runs in one atomic transaction so we never end up with a
-    half-created account.
-    """
+    """Public self-registration. Creates a linked PATIENT login + emails password."""
 
     permission_classes = [AllowAny]
     serializer_class = PatientSerializer
 
     def perform_create(self, serializer):
-
-        username = (serializer.validated_data.pop("username", "") or "").strip()
-        password = serializer.validated_data.pop("password", "") or ""
-
+        email = (serializer.validated_data.pop("email", "") or "").strip().lower()
         with transaction.atomic():
             user = None
-            if username and password:
+            password = None
+            if email:
+                password = _generate_password()
                 user = Staff(
-                    username=username,
+                    email=email,
                     full_name=(
                         f"{serializer.validated_data.get('first_name', '')} "
                         f"{serializer.validated_data.get('last_name', '')}"
                     ).strip(),
                     role=Role.PATIENT,
+                    status=StaffStatus.ACTIVE,
+                    is_active=True,
+                    must_change_password=True,
                 )
                 user.set_password(password)
                 user.save()
-
-            serializer.save(registered_by=RegisteredBy.SELF, user=user)
-
+            patient = serializer.save(registered_by=RegisteredBy.SELF, user=user)
+            if user and password:
+                _email_credentials(user, password)
+            self._created_patient = patient
 
 
 class PatientListCreateView(generics.ListCreateAPIView):
-    """
-    Internal patient directory.
-
-    - GET (list/search): DOCTOR, PHARMACIST, RECEPTIONIST. Supports ?search= to
-      match name or hospital identifier.
-    - POST (receptionist intake): RECEPTIONIST only; stamps registered_by
-      RECEPTIONIST.
-    """
+    """Directory (read: clinical roles) + receptionist intake (write)."""
 
     serializer_class = PatientSerializer
     permission_classes = [EnforceStrictRole]
-
-    # Read is open to the clinical roles; write is restricted further below.
-    allowed_roles = [Role.DOCTOR, Role.PHARMACIST, Role.RECEPTIONIST]
+    allowed_roles = [Role.DOCTOR, Role.PHARMACIST, Role.RECEPTIONIST, Role.NURSE]
 
     def get_queryset(self):
         qs = Patient.objects.all().order_by("-created_at")
         search = self.request.query_params.get("search")
         if search:
-            from django.db.models import Q
-
             qs = qs.filter(
                 Q(first_name__icontains=search)
                 | Q(last_name__icontains=search)
                 | Q(hospital_identifier__icontains=search)
+                | Q(national_id__icontains=search)
+                | Q(phone_number__icontains=search)
             )
         return qs
 
     def create(self, request, *args, **kwargs):
-        # Only receptionists may key in a patient here.
         if request.user.role != Role.RECEPTIONIST:
             return Response(
                 {"detail": "Only a receptionist can register patients here."},
@@ -213,83 +411,80 @@ class PatientListCreateView(generics.ListCreateAPIView):
         return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
-        serializer.save(registered_by=RegisteredBy.RECEPTIONIST)
+        email = (serializer.validated_data.pop("email", "") or "").strip().lower()
+        with transaction.atomic():
+            user = None
+            password = None
+            if email:
+                password = _generate_password()
+                user = Staff(
+                    email=email,
+                    full_name=(
+                        f"{serializer.validated_data.get('first_name', '')} "
+                        f"{serializer.validated_data.get('last_name', '')}"
+                    ).strip(),
+                    role=Role.PATIENT,
+                    status=StaffStatus.ACTIVE,
+                    is_active=True,
+                    must_change_password=True,
+                )
+                user.set_password(password)
+                user.save()
+            serializer.save(registered_by=RegisteredBy.RECEPTIONIST, user=user)
+            if user and password:
+                _email_credentials(user, password)
 
 
 class PatientDetailView(generics.RetrieveAPIView):
-    """View a single patient profile (DOCTOR / PHARMACIST / RECEPTIONIST)."""
-
     queryset = Patient.objects.all()
     serializer_class = PatientSerializer
     permission_classes = [EnforceStrictRole]
-    allowed_roles = [Role.DOCTOR, Role.PHARMACIST, Role.RECEPTIONIST]
+    allowed_roles = [Role.DOCTOR, Role.PHARMACIST, Role.RECEPTIONIST, Role.NURSE]
+
+
+def _build_timeline(patient):
+    """Shared payload: profile, diagnoses, prescriptions, lab results + trends."""
+    results = LabResult.objects.filter(patient=patient).order_by("created_at")
+    prescriptions = Prescription.objects.filter(patient=patient).order_by("-created_at")
+    diagnoses = Diagnosis.objects.filter(patient=patient).order_by("-created_at")
+    encounters = Encounter.objects.filter(patient=patient).order_by("-created_at")
+
+    trends = {}
+    for r in results:
+        if r.result_value is None:
+            continue
+        trends.setdefault(
+            r.test_code,
+            {"test_code": r.test_code, "test_name": r.test_name, "unit": r.result_unit, "points": []},
+        )
+        trends[r.test_code]["points"].append(
+            {"date": r.created_at.isoformat(), "value": float(r.result_value), "flag": r.flag}
+        )
+
+    return {
+        "patient": PatientSerializer(patient).data,
+        "encounters": EncounterSerializer(encounters, many=True).data,
+        "prescriptions": PrescriptionSerializer(prescriptions, many=True).data,
+        "lab_results": LabResultSerializer(results, many=True).data,
+        "diagnoses": DiagnosisSerializer(diagnoses, many=True).data,
+        "trends": list(trends.values()),
+    }
 
 
 class PatientTimelineView(APIView):
-    """
-    DOCTOR-only clinical cockpit data for one patient: the profile, the full
-    prescription history, all lab results, and a per-test series prepared for
-    plotting lab trends over time.
-    """
-
     permission_classes = [EnforceStrictRole]
-    allowed_roles = [Role.DOCTOR]
+    allowed_roles = [Role.DOCTOR, Role.NURSE]
 
     def get(self, request, pk):
         try:
             patient = Patient.objects.get(pk=pk)
         except Patient.DoesNotExist:
-            return Response(
-                {"detail": "Patient not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        observations = LabObservation.objects.filter(patient=patient).order_by(
-            "created_at"
-        )
-        prescriptions = Prescription.objects.filter(patient=patient).order_by(
-            "-created_at"
-        )
-        diagnoses = Diagnosis.objects.filter(patient=patient).order_by("-created_at")
-
-        # Group observations by test into time-ordered series for the charts.
-        trends = {}
-        for obs in observations:
-            trends.setdefault(
-                obs.test_name,
-                {"test_name": obs.test_name, "unit": obs.result_unit, "points": []},
-            )
-            trends[obs.test_name]["unit"] = obs.result_unit
-            trends[obs.test_name]["points"].append(
-                {
-                    "date": obs.created_at.isoformat(),
-                    "value": float(obs.result_value),
-                }
-            )
-
-        return Response(
-            {
-                "patient": PatientSerializer(patient).data,
-                "prescriptions": PrescriptionSerializer(prescriptions, many=True).data,
-                "observations": LabObservationSerializer(
-                    observations, many=True
-                ).data,
-                "diagnoses": DiagnosisSerializer(diagnoses, many=True).data,
-                "trends": list(trends.values()),
-            }
-        )
-
-
+            return Response({"detail": "Patient not found."}, status=404)
+        return Response(_build_timeline(patient))
 
 
 class PatientPortalView(APIView):
-    """
-    PATIENT-only read-only portal (REQ personas 2.1/2.5).
-
-    Returns the signed-in patient's OWN profile, finalized lab observations, and
-    active/past medications. Scoping is by the linked user account, so a patient
-    can never see anyone else's rows even by guessing an id.
-    """
+    """PATIENT reads only their own linked record."""
 
     permission_classes = [EnforceStrictRole]
     allowed_roles = [Role.PATIENT]
@@ -299,120 +494,227 @@ class PatientPortalView(APIView):
         if patient is None:
             return Response(
                 {"detail": "No patient profile is linked to this account."},
-                status=status.HTTP_404_NOT_FOUND,
+                status=404,
             )
+        return Response(_build_timeline(patient))
 
-        observations = LabObservation.objects.filter(patient=patient).order_by(
-            "created_at"
-        )
-        prescriptions = Prescription.objects.filter(patient=patient).order_by(
+
+# --------------------------------------------------------------------------- #
+# Encounters + status queue
+# --------------------------------------------------------------------------- #
+
+
+class EncounterListCreateView(generics.ListCreateAPIView):
+    serializer_class = EncounterSerializer
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = [Role.RECEPTIONIST, Role.NURSE, Role.DOCTOR, Role.LAB_TECH, Role.PHARMACIST]
+
+    def get_queryset(self):
+        qs = Encounter.objects.select_related(
+            "patient", "attending_doctor"
+        ).order_by("-created_at")
+        status_param = self.request.query_params.get("status")
+        dept_param = self.request.query_params.get("department")
+        patient_param = self.request.query_params.get("patient")
+        if status_param:
+            qs = qs.filter(status=status_param)
+        if dept_param:
+            qs = qs.filter(department=dept_param)
+        if patient_param:
+            qs = qs.filter(patient_id=patient_param)
+        # Nurses default to encounters awaiting vitals.
+        if self.request.user.role == Role.NURSE and not status_param:
+            qs = qs.filter(status=EncounterStatus.REGISTERED)
+        # Doctors default to their own department + waiting-for-doctor states.
+        if self.request.user.role == Role.DOCTOR and not status_param:
+            qs = qs.filter(
+                department=self.request.user.department,
+                status__in=[EncounterStatus.VITALS_DONE, EncounterStatus.WITH_DOCTOR, EncounterStatus.LAB_DONE],
+            )
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        if request.user.role != Role.RECEPTIONIST:
+            return Response(
+                {"detail": "Only a receptionist can check patients in."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().create(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user, status=EncounterStatus.REGISTERED)
+
+
+class EncounterDetailView(generics.RetrieveUpdateAPIView):
+    queryset = Encounter.objects.all()
+    serializer_class = EncounterSerializer
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = [Role.RECEPTIONIST, Role.NURSE, Role.DOCTOR]
+
+
+class EncounterStatusView(APIView):
+    """Advance an encounter's status (role-guarded transitions)."""
+
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = [Role.NURSE, Role.DOCTOR, Role.LAB_TECH]
+
+    def post(self, request, pk):
+        try:
+            enc = Encounter.objects.get(pk=pk)
+        except Encounter.DoesNotExist:
+            return Response({"detail": "Encounter not found."}, status=404)
+        new_status = request.data.get("status")
+        valid = {s for s, _ in EncounterStatus.CHOICES}
+        if new_status not in valid:
+            return Response({"detail": "Invalid status."}, status=400)
+        enc.status = new_status
+        enc.save(update_fields=["status", "updated_at"])
+        return Response(EncounterSerializer(enc).data)
+
+
+# --------------------------------------------------------------------------- #
+# Vitals (nurse)
+# --------------------------------------------------------------------------- #
+
+
+class VitalsCreateView(generics.CreateAPIView):
+    serializer_class = VitalsSerializer
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = [Role.NURSE]
+
+    def perform_create(self, serializer):
+        with transaction.atomic():
+            vitals = serializer.save(recorded_by=self.request.user)
+            enc = vitals.encounter
+            if enc.status == EncounterStatus.REGISTERED:
+                enc.status = EncounterStatus.VITALS_DONE
+                enc.save(update_fields=["status", "updated_at"])
+
+
+class VitalsDetailView(generics.RetrieveAPIView):
+    queryset = Vitals.objects.all()
+    serializer_class = VitalsSerializer
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = [Role.NURSE, Role.DOCTOR]
+    lookup_field = "encounter_id"
+    lookup_url_kwarg = "encounter_id"
+
+
+# --------------------------------------------------------------------------- #
+# Lab: orders (doctor) + reports/results (lab tech)
+# --------------------------------------------------------------------------- #
+
+
+class LabOrderListCreateView(generics.ListCreateAPIView):
+    serializer_class = LabOrderSerializer
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = [Role.DOCTOR, Role.LAB_TECH]
+
+    def get_queryset(self):
+        qs = LabOrder.objects.select_related("patient", "ordered_by").order_by(
             "-created_at"
         )
-        diagnoses = Diagnosis.objects.filter(patient=patient).order_by("-created_at")
+        status_param = self.request.query_params.get("status")
+        patient_param = self.request.query_params.get("patient")
+        if status_param:
+            qs = qs.filter(status=status_param)
+        elif self.request.user.role == Role.LAB_TECH:
+            qs = qs.filter(status=LabOrderStatus.PENDING)
+        if patient_param:
+            qs = qs.filter(patient_id=patient_param)
+        return qs
 
-        # Per-test time-ordered series so the portal can chart trends too.
-        trends = {}
-        for obs in observations:
-            trends.setdefault(
-                obs.test_name,
-                {"test_name": obs.test_name, "unit": obs.result_unit, "points": []},
+    def create(self, request, *args, **kwargs):
+        if request.user.role != Role.DOCTOR:
+            return Response(
+                {"detail": "Only a doctor can order a lab test."},
+                status=status.HTTP_403_FORBIDDEN,
             )
-            trends[obs.test_name]["unit"] = obs.result_unit
-            trends[obs.test_name]["points"].append(
-                {
-                    "date": obs.created_at.isoformat(),
-                    "value": float(obs.result_value),
-                }
+        return super().create(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        with transaction.atomic():
+            order = serializer.save(ordered_by=self.request.user)
+            enc = order.encounter
+            if enc.status in (EncounterStatus.WITH_DOCTOR, EncounterStatus.VITALS_DONE):
+                enc.status = EncounterStatus.LAB_PENDING
+                enc.save(update_fields=["status", "updated_at"])
+
+
+class LabReportCreateView(generics.CreateAPIView):
+    """LAB_TECH submits a report (order + nested results). Closes the order."""
+
+    serializer_class = LabReportSerializer
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = [Role.LAB_TECH]
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        results_data = serializer.validated_data.pop("results", [])
+        lab_order = serializer.validated_data["lab_order"]
+
+        with transaction.atomic():
+            report = LabReport.objects.create(
+                lab_order=lab_order,
+                patient=lab_order.patient,
+                entered_by=request.user,
+                pdf_file=serializer.validated_data.get("pdf_file"),
+                source=serializer.validated_data.get("source", "MANUAL"),
+                status=LabReport.CONFIRMED,
             )
+            for r in results_data:
+                LabResult.objects.create(
+                    lab_report=report,
+                    patient=lab_order.patient,
+                    test_code=r["test_code"],
+                    result_value=r.get("result_value"),
+                    report_text=r.get("report_text", ""),
+                )
+            lab_order.status = LabOrderStatus.COMPLETED
+            lab_order.save(update_fields=["status", "updated_at"])
+            enc = lab_order.encounter
+            if not enc.lab_orders.filter(status=LabOrderStatus.PENDING).exists():
+                enc.status = EncounterStatus.LAB_DONE
+                enc.save(update_fields=["status", "updated_at"])
 
         return Response(
-            {
-                "patient": PatientSerializer(patient).data,
-                "observations": LabObservationSerializer(
-                    observations, many=True
-                ).data,
-                "prescriptions": PrescriptionSerializer(prescriptions, many=True).data,
-                "diagnoses": DiagnosisSerializer(diagnoses, many=True).data,
-                "trends": list(trends.values()),
-            }
+            LabReportSerializer(report).data, status=status.HTTP_201_CREATED
         )
 
 
+class LabResultListView(generics.ListAPIView):
+    serializer_class = LabResultSerializer
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = [Role.DOCTOR, Role.LAB_TECH, Role.NURSE]
+
+    def get_queryset(self):
+        qs = LabResult.objects.select_related("patient").order_by("-created_at")
+        patient_param = self.request.query_params.get("patient")
+        if patient_param:
+            qs = qs.filter(patient_id=patient_param)
+        return qs
+
 
 # --------------------------------------------------------------------------- #
-# Prescriptions: the Clinical Safety Interceptor
+# Prescriptions (doctor writes, pharmacist dispenses)
 # --------------------------------------------------------------------------- #
-
 
 
 class PrescriptionCreateView(generics.CreateAPIView):
-    """
-    DOCTOR-only. Creates a prescription ONLY if the medication does not match any
-    of the patient's documented allergies.
-
-    The whole thing runs inside a single atomic transaction (REQ-006/007): if a
-    match is found we never commit the row and return a 400 with the safety
-    payload the frontend renders as a red alert.
-    """
+    """DOCTOR writes a prescription. No blocking allergy check (banner only)."""
 
     permission_classes = [EnforceStrictRole]
     allowed_roles = [Role.DOCTOR]
     serializer_class = PrescriptionSerializer
 
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        patient = serializer.validated_data["patient"]
-        medication = serializer.validated_data["medication_name"]
-
-        with transaction.atomic():
-            matched = self._find_allergy_match(medication, patient.allergies)
-            if matched:
-                # Abort: nothing is written because we raise before .save().
-                return Response(
-                    {
-                        "security_alert": True,
-                        "violation_type": "DRUG_ALLERGY_MATCH",
-                        "matched_allergen_token": matched,
-                        "message": (
-                            "CRITICAL ALERT: Transaction Aborted. This medication "
-                            "matches a documented allergy entry on this patient "
-                            "profile!"
-                        ),
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            serializer.save(
-                prescribed_by=request.user,
-                status=PrescriptionStatus.ACTIVE,
-            )
-
-        headers = self.get_success_headers(serializer.data)
-        return Response(
-            serializer.data, status=status.HTTP_201_CREATED, headers=headers
+    def perform_create(self, serializer):
+        serializer.save(
+            prescribed_by=self.request.user, status=PrescriptionStatus.ACTIVE
         )
-
-    @staticmethod
-    def _find_allergy_match(medication_name, allergies):
-        """
-        Case-insensitive substring cross-match. Returns the matched allergen
-        token, or None. E.g. medication "Penicillin G" matches allergen
-        "Penicillin".
-        """
-        med = (medication_name or "").lower()
-        for allergen in allergies or []:
-            token = str(allergen).lower().strip()
-            if token and token in med:
-                return allergen
-        return None
 
 
 class PrescriptionQueueView(generics.ListAPIView):
-    """
-    PHARMACIST-only: the dispensing queue = all ACTIVE prescriptions, newest
-    first, grouped in the UI by patient.
-    """
-
     permission_classes = [EnforceStrictRole]
     allowed_roles = [Role.PHARMACIST]
     serializer_class = PrescriptionSerializer
@@ -426,152 +728,42 @@ class PrescriptionQueueView(generics.ListAPIView):
 
 
 class PrescriptionFulfillView(APIView):
-    """PHARMACIST-only: mark an active prescription as dispensed/completed."""
-
     permission_classes = [EnforceStrictRole]
     allowed_roles = [Role.PHARMACIST]
 
     def post(self, request, pk):
         try:
-            prescription = Prescription.objects.get(pk=pk)
+            rx = Prescription.objects.get(pk=pk)
         except Prescription.DoesNotExist:
-            return Response(
-                {"detail": "Prescription not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        if prescription.status == PrescriptionStatus.COMPLETED:
-            return Response(
-                {"detail": "This prescription was already fulfilled."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        prescription.status = PrescriptionStatus.COMPLETED
-        prescription.fulfilled_by = request.user
-        prescription.fulfilled_at = timezone.now()
-        prescription.save()
-
-        return Response(PrescriptionSerializer(prescription).data)
+            return Response({"detail": "Prescription not found."}, status=404)
+        if rx.status == PrescriptionStatus.COMPLETED:
+            return Response({"detail": "Already fulfilled."}, status=400)
+        rx.status = PrescriptionStatus.COMPLETED
+        rx.fulfilled_by = request.user
+        rx.fulfilled_at = timezone.now()
+        rx.save()
+        return Response(PrescriptionSerializer(rx).data)
 
 
 # --------------------------------------------------------------------------- #
-# Laboratory: orders (doctor) + results (lab tech)
+# Diagnoses (ICD-10 problem list)
 # --------------------------------------------------------------------------- #
-
-
-class LabOrderListCreateView(generics.ListCreateAPIView):
-    """
-    - POST: a DOCTOR requests a test for a patient.
-    - GET: the lab queue. LAB_TECH sees pending orders; DOCTOR sees the orders
-      they made. Supports ?status=PENDING|COMPLETED.
-    """
-
-    serializer_class = LabOrderSerializer
-    permission_classes = [EnforceStrictRole]
-    allowed_roles = [Role.DOCTOR, Role.LAB_TECH]
-
-    def get_queryset(self):
-        qs = LabOrder.objects.select_related("patient", "ordered_by").order_by(
-            "-created_at"
-        )
-        status_param = self.request.query_params.get("status")
-        if status_param:
-            qs = qs.filter(status=status_param)
-        # A lab tech's queue defaults to still-pending work.
-        elif self.request.user.role == Role.LAB_TECH:
-            qs = qs.filter(status=LabOrderStatus.PENDING)
-        return qs
-
-    def create(self, request, *args, **kwargs):
-        if request.user.role != Role.DOCTOR:
-            return Response(
-                {"detail": "Only a doctor can order a lab test."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        return super().create(request, *args, **kwargs)
-
-    def perform_create(self, serializer):
-        serializer.save(ordered_by=self.request.user)
-
-
-class LabObservationListCreateView(generics.ListCreateAPIView):
-    """
-    - POST: a LAB_TECH enters a result (range-validated in the serializer). If it
-      is linked to an order, that order is flipped to COMPLETED.
-    - GET: results. LAB_TECH + DOCTOR may read; filter by ?patient=<uuid>.
-    """
-
-    serializer_class = LabObservationSerializer
-    permission_classes = [EnforceStrictRole]
-    allowed_roles = [Role.DOCTOR, Role.LAB_TECH]
-
-    def get_queryset(self):
-        qs = LabObservation.objects.select_related(
-            "patient", "entered_by"
-        ).order_by("-created_at")
-        patient_id = self.request.query_params.get("patient")
-        if patient_id:
-            qs = qs.filter(patient_id=patient_id)
-        return qs
-
-    def create(self, request, *args, **kwargs):
-        if request.user.role != Role.LAB_TECH:
-            return Response(
-                {"detail": "Only a lab technician can submit results."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        return super().create(request, *args, **kwargs)
-
-    def perform_create(self, serializer):
-        with transaction.atomic():
-            observation = serializer.save(entered_by=self.request.user)
-            # Close the linked order, if any.
-            if observation.lab_order_id:
-                order = observation.lab_order
-                order.status = LabOrderStatus.COMPLETED
-                order.save(update_fields=["status", "updated_at"])
-
-
-# --------------------------------------------------------------------------- #
-# Diagnoses: the doctor's problem list (ICD-10 coded)
-# --------------------------------------------------------------------------- #
-
-
-@api_view(["GET"])
-@permission_classes([IsAuthenticated])
-def icd10_catalog(request):
-    """
-    Return the curated ICD-10 vocabulary so the frontend can render a searchable
-    diagnosis dropdown. Any authenticated staff/patient may read the list.
-    """
-    catalog = [{"code": code, "name": name} for code, name in ICD10.CODES.items()]
-    return Response({"count": len(catalog), "results": catalog})
 
 
 class DiagnosisListCreateView(generics.ListCreateAPIView):
-    """
-    - POST: a DOCTOR records a diagnosis for a patient (ICD-10 coded). The system
-      only STORES the doctor's chosen diagnosis; it never auto-diagnoses.
-    - GET: list diagnoses. DOCTOR may read any (filter with ?patient=<uuid>);
-      a PATIENT reads only their own linked record.
-    """
-
     serializer_class = DiagnosisSerializer
     permission_classes = [EnforceStrictRole]
     allowed_roles = [Role.DOCTOR, Role.PATIENT]
 
     def get_queryset(self):
-        qs = Diagnosis.objects.select_related(
-            "patient", "diagnosed_by"
-        ).order_by("-created_at")
-
+        qs = Diagnosis.objects.select_related("patient", "diagnosed_by").order_by(
+            "-created_at"
+        )
         if self.request.user.role == Role.PATIENT:
-            # Scope strictly to the patient's own linked profile.
             return qs.filter(patient__user=self.request.user)
-
-        patient_id = self.request.query_params.get("patient")
-        if patient_id:
-            qs = qs.filter(patient_id=patient_id)
+        patient_param = self.request.query_params.get("patient")
+        if patient_param:
+            qs = qs.filter(patient_id=patient_param)
         status_param = self.request.query_params.get("status")
         if status_param:
             qs = qs.filter(clinical_status=status_param)
@@ -590,42 +782,28 @@ class DiagnosisListCreateView(generics.ListCreateAPIView):
 
 
 class DiagnosisResolveView(APIView):
-    """DOCTOR-only: mark an active diagnosis as resolved."""
-
     permission_classes = [EnforceStrictRole]
     allowed_roles = [Role.DOCTOR]
 
     def post(self, request, pk):
         try:
-            diagnosis = Diagnosis.objects.get(pk=pk)
+            dx = Diagnosis.objects.get(pk=pk)
         except Diagnosis.DoesNotExist:
-            return Response(
-                {"detail": "Diagnosis not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        if diagnosis.clinical_status == DiagnosisStatus.RESOLVED:
-            return Response(
-                {"detail": "This diagnosis is already resolved."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        diagnosis.clinical_status = DiagnosisStatus.RESOLVED
-        diagnosis.resolved_at = timezone.now()
-        diagnosis.save(update_fields=["clinical_status", "resolved_at", "updated_at"])
-
-        return Response(DiagnosisSerializer(diagnosis).data)
+            return Response({"detail": "Diagnosis not found."}, status=404)
+        if dx.clinical_status == DiagnosisStatus.RESOLVED:
+            return Response({"detail": "Already resolved."}, status=400)
+        dx.clinical_status = DiagnosisStatus.RESOLVED
+        dx.resolved_at = timezone.now()
+        dx.save(update_fields=["clinical_status", "resolved_at", "updated_at"])
+        return Response(DiagnosisSerializer(dx).data)
 
 
 # --------------------------------------------------------------------------- #
-# FHIR R4 interoperability layer (read-only)
+# FHIR R4 (read-only)
 # --------------------------------------------------------------------------- #
-
 
 
 class FHIRPatientView(APIView):
-    """GET a single patient as a FHIR R4 `Patient` resource."""
-
     permission_classes = [EnforceStrictRole]
     allowed_roles = FHIR_READ_ROLES
 
@@ -633,42 +811,45 @@ class FHIRPatientView(APIView):
         try:
             patient = Patient.objects.get(pk=pk)
         except Patient.DoesNotExist:
-            return Response(
-                {"resourceType": "OperationOutcome", "issue": [{"severity": "error", "code": "not-found"}]},
-                status=status.HTTP_404_NOT_FOUND,
-                content_type=FHIR_CONTENT_TYPE,
-            )
-        return Response(
-            patient_to_fhir(patient), content_type=FHIR_CONTENT_TYPE
-        )
+            return _fhir_error("Patient not found")
+        return Response(patient_to_fhir(patient), content_type=FHIR_CONTENT_TYPE)
 
 
 class FHIRObservationView(APIView):
-    """GET a single lab result as a FHIR R4 `Observation` resource."""
-
     permission_classes = [EnforceStrictRole]
     allowed_roles = FHIR_READ_ROLES
 
     def get(self, request, pk):
         try:
-            observation = LabObservation.objects.get(pk=pk)
-        except LabObservation.DoesNotExist:
-            return Response(
-                {"resourceType": "OperationOutcome", "issue": [{"severity": "error", "code": "not-found"}]},
-                status=status.HTTP_404_NOT_FOUND,
-                content_type=FHIR_CONTENT_TYPE,
-            )
-        return Response(
-            observation_to_fhir(observation), content_type=FHIR_CONTENT_TYPE
-        )
+            result = LabResult.objects.get(pk=pk)
+        except LabResult.DoesNotExist:
+            return _fhir_error("Observation not found")
+        return Response(observation_to_fhir(result), content_type=FHIR_CONTENT_TYPE)
+
+
+class FHIRConditionView(APIView):
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = FHIR_READ_ROLES
+
+    def get(self, request, pk):
+        try:
+            dx = Diagnosis.objects.get(pk=pk)
+        except Diagnosis.DoesNotExist:
+            return _fhir_error("Condition not found")
+        return Response(condition_to_fhir(dx), content_type=FHIR_CONTENT_TYPE)
+
+
+def _everything(patient, base_url):
+    encounters = Encounter.objects.filter(patient=patient).order_by("created_at")
+    results = LabResult.objects.filter(patient=patient).order_by("created_at")
+    diagnoses = Diagnosis.objects.filter(patient=patient).order_by("created_at")
+    prescriptions = Prescription.objects.filter(patient=patient).order_by("created_at")
+    return build_everything_bundle(
+        patient, encounters, results, diagnoses, prescriptions, base_url
+    )
 
 
 class FHIRPatientEverythingView(APIView):
-    """
-    GET a FHIR `Bundle` (searchset) with the patient plus all of their
-    observations — the FHIR `$everything` operation.
-    """
-
     permission_classes = [EnforceStrictRole]
     allowed_roles = FHIR_READ_ROLES
 
@@ -676,75 +857,158 @@ class FHIRPatientEverythingView(APIView):
         try:
             patient = Patient.objects.get(pk=pk)
         except Patient.DoesNotExist:
-            return Response(
-                {"resourceType": "OperationOutcome", "issue": [{"severity": "error", "code": "not-found"}]},
-                status=status.HTTP_404_NOT_FOUND,
-                content_type=FHIR_CONTENT_TYPE,
-            )
-        observations = LabObservation.objects.filter(patient=patient).order_by(
-            "created_at"
-        )
-        bundle = build_everything_bundle(
-            patient, observations, base_url=request.build_absolute_uri("/")
-        )
+            return _fhir_error("Patient not found")
+        bundle = _everything(patient, request.build_absolute_uri("/"))
         return Response(bundle, content_type=FHIR_CONTENT_TYPE)
 
-# ================================================================
-# PASSWORD RESET VIEWS (appended at the bottom)
-# ================================================================
-class PasswordResetRequestView(APIView):
-    """Step 1: User submits email → sends reset link."""
 
+# --------------------------------------------------------------------------- #
+# Cross-hospital sharing: request -> patient approval -> FHIR Bundle
+# --------------------------------------------------------------------------- #
+
+
+class ShareRequestCreateView(APIView):
+    """
+    External hospital requests a patient's record by National ID. Public
+    endpoint (the external system is not a user of this hospital). Returns a
+    request id to poll. The patient must approve in their portal.
+    """
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        national_id = (request.data.get("national_id") or "").strip()
+        label = (request.data.get("requester_label") or "").strip()
+        if not national_id:
+            return Response({"detail": "national_id is required."}, status=400)
+        patient = Patient.objects.filter(national_id=national_id).first()
+        req = AccessRequest.objects.create(
+            patient=patient,
+            national_id=national_id,
+            requester_label=label,
+            status=AccessRequestStatus.PENDING,
+            expires_at=timezone.now() + timedelta(minutes=5),
+        )
+        return Response(
+            {
+                "request_id": str(req.id),
+                "status": req.status,
+                "message": "Awaiting patient approval. Poll the status endpoint.",
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+
+class ShareRequestStatusView(APIView):
+    """External hospital polls here; on APPROVED it receives the FHIR Bundle."""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request, pk):
+        try:
+            req = AccessRequest.objects.get(pk=pk)
+        except AccessRequest.DoesNotExist:
+            return _fhir_error("Request not found")
+
+        if (
+            req.status == AccessRequestStatus.PENDING
+            and req.expires_at < timezone.now()
+        ):
+            req.status = AccessRequestStatus.EXPIRED
+            req.save(update_fields=["status", "updated_at"])
+
+        if req.status == AccessRequestStatus.APPROVED and req.patient:
+            bundle = _everything(req.patient, request.build_absolute_uri("/"))
+            return Response(bundle, content_type=FHIR_CONTENT_TYPE)
+        if req.status == AccessRequestStatus.PENDING:
+            return Response({"status": "PENDING"}, status=status.HTTP_202_ACCEPTED)
+        return Response({"status": req.status}, status=status.HTTP_403_FORBIDDEN)
+
+
+class PatientShareRequestsView(APIView):
+    """PATIENT sees pending share requests for their own NID."""
+
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = [Role.PATIENT]
+
+    def get(self, request):
+        patient = Patient.objects.filter(user=request.user).first()
+        if not patient:
+            return Response({"results": []})
+        reqs = AccessRequest.objects.filter(
+            Q(patient=patient) | Q(national_id=patient.national_id)
+        ).order_by("-created_at")
+        return Response({"results": AccessRequestSerializer(reqs, many=True).data})
+
+
+class PatientShareDecisionView(APIView):
+    """PATIENT approves or denies a share request."""
+
+    permission_classes = [EnforceStrictRole]
+    allowed_roles = [Role.PATIENT]
+
+    def post(self, request, pk):
+        patient = Patient.objects.filter(user=request.user).first()
+        if not patient:
+            return Response({"detail": "No patient profile."}, status=404)
+        try:
+            req = AccessRequest.objects.get(pk=pk)
+        except AccessRequest.DoesNotExist:
+            return Response({"detail": "Request not found."}, status=404)
+        if req.national_id != patient.national_id:
+            return Response({"detail": "Not your request."}, status=403)
+
+        decision = (request.data.get("decision") or "").upper()
+        if decision == "APPROVE":
+            req.patient = patient
+            req.status = AccessRequestStatus.APPROVED
+            req.approved_at = timezone.now()
+            req.expires_at = timezone.now() + timedelta(minutes=30)
+        elif decision == "DENY":
+            req.status = AccessRequestStatus.DENIED
+        else:
+            return Response({"detail": "decision must be APPROVE or DENY."}, status=400)
+        req.save()
+        return Response(AccessRequestSerializer(req).data)
+
+
+# --------------------------------------------------------------------------- #
+# Password reset
+# --------------------------------------------------------------------------- #
+
+
+class PasswordResetRequestView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = PasswordResetRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
         email = serializer.validated_data["email"]
         user = Staff.objects.filter(email=email, is_active=True).first()
-
         if user:
-            # Generate token and uid
             token = default_token_generator.make_token(user)
             uid = urlsafe_base64_encode(force_bytes(user.pk))
-
-            # Build the reset link (points to your frontend)
-            frontend_url = "http://localhost:3000"
-            reset_link = f"{frontend_url}/reset-password/{uid}/{token}/"
-
-            # Send email (prints to console in development)
+            reset_link = f"{FRONTEND_URL}/reset-password/{uid}/{token}/"
             send_mail(
                 subject="Reset Your SwasthyaEHR Password",
-                message=f"Click the link below to reset your password:\n\n{reset_link}",
+                message=f"Click the link to reset your password:\n\n{reset_link}",
                 from_email="noreply@swasthya.org.np",
                 recipient_list=[email],
-                fail_silently=False,
+                fail_silently=True,
             )
-
-        # Always return a success message (don't reveal if email exists)
         return Response(
-            {"detail": "If an account exists with this email, a reset link has been sent."},
-            status=status.HTTP_200_OK,
+            {"detail": "If an account exists with this email, a reset link was sent."}
         )
 
 
 class PasswordResetConfirmView(APIView):
-    """Step 2: User submits new password with uid + token."""
-
     permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = PasswordResetConfirmSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
         user = serializer.validated_data["user"]
-        new_password = serializer.validated_data["new_password"]
-
-        user.set_password(new_password)
+        user.set_password(serializer.validated_data["new_password"])
+        user.must_change_password = False
         user.save()
-
-        return Response(
-            {"detail": "Password has been reset successfully."},
-            status=status.HTTP_200_OK,
-        )
+        return Response({"detail": "Password has been reset successfully."})

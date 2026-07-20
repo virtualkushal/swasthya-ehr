@@ -1,15 +1,17 @@
 """
-Seed a full set of demo data for local exploration of the whole frontend.
+Seed a full set of demo data for local exploration of the whole frontend (v2).
 
-Creates one staff login for EVERY role (so you can log in and see each
-dashboard) plus a couple of sample patients — one with a Penicillin allergy so
-you can immediately demo the pharmacy safety interceptor.
+Creates one staff login for EVERY role (email login) plus sample patients with
+full clinical history: encounters across departments, nurse vitals, ICD-10
+diagnoses, lab orders + results (quantitative trends + report-type), and
+prescriptions.
 
 Usage:
     python manage.py seed_demo
 
 All demo accounts use the password:  demo12345
-This is for local development only — never run it against production.
+Login is by EMAIL, e.g.  doctor@demo.np / demo12345
+Local development only — never run against production.
 """
 
 from datetime import date, timedelta
@@ -19,237 +21,245 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from core.constants import (
+    Department,
+    DiagnosisStatus,
+    EncounterStatus,
     Gender,
     LabOrderStatus,
-    LabTest,
+    LabResultType,
     PrescriptionStatus,
     RegisteredBy,
     Role,
+    StaffStatus,
 )
-from core.models import LabObservation, LabOrder, Patient, Prescription
+from core.models import (
+    Diagnosis,
+    Encounter,
+    LabOrder,
+    LabReport,
+    LabResult,
+    Patient,
+    Prescription,
+    Vitals,
+)
 
 Staff = get_user_model()
 
-
 DEMO_PASSWORD = "demo12345"
 
-# username, full name, role
+# email, full name, role, department
 DEMO_STAFF = [
-    ("admin", "System Administrator", Role.ADMIN),
-    ("reception", "Front Desk Receptionist Gita", Role.RECEPTIONIST),
-    ("reception2", "Receptionist Kabita Rai", Role.RECEPTIONIST),
-    ("doctor", "Dr. Anjali Sharma", Role.DOCTOR),
-    ("doctor2", "Dr. Bikram Thapa", Role.DOCTOR),
-    ("doctor3", "Dr. Sabina Gurung", Role.DOCTOR),
-    ("labtech", "Lab Technician Bikash", Role.LAB_TECH),
-    ("labtech2", "Lab Technician Prakash", Role.LAB_TECH),
-    ("pharmacist", "Pharmacist Rojina", Role.PHARMACIST),
-    ("pharmacist2", "Pharmacist Manish", Role.PHARMACIST),
+    ("admin@demo.np", "System Administrator", Role.ADMIN, None),
+    ("reception@demo.np", "Receptionist Gita", Role.RECEPTIONIST, None),
+    ("nurse@demo.np", "Nurse Kabita Rai", Role.NURSE, None),
+    ("doctor@demo.np", "Dr. Anjali Sharma", Role.DOCTOR, Department.ENDOCRINOLOGY),
+    ("doctor2@demo.np", "Dr. Bikram Thapa", Role.DOCTOR, Department.CARDIOLOGY),
+    ("doctor3@demo.np", "Dr. Sabina Gurung", Role.DOCTOR, Department.INFECTIOUS_DISEASES),
+    ("labtech@demo.np", "Lab Technician Bikash", Role.LAB_TECH, None),
+    ("pharmacist@demo.np", "Pharmacist Rojina", Role.PHARMACIST, None),
 ]
 
-# first, last, phone, dob, gender, allergies, registered_by, portal_username
-# When portal_username is set, the patient also gets a login (role PATIENT) so
-# you can demo the read-only patient portal.
+# first, last, phone, dob, gender, blood_group, allergies, reg_by, portal_email, dept
 DEMO_PATIENTS = [
-    (
-        "Ram", "Bahadur", "+977-9841000001", date(1994, 5, 12),
-        Gender.MALE, ["Penicillin"], RegisteredBy.SELF, "patient",
-    ),
-    (
-        "Sita", "Kumari", "+977-9803000002", date(1988, 11, 23),
-        Gender.FEMALE, ["None"], RegisteredBy.RECEPTIONIST, None,
-    ),
-    (
-        "Hari", "Prasad", "+977-9841000003", date(1979, 2, 3),
-        Gender.MALE, ["Aspirin", "NSAIDs"], RegisteredBy.RECEPTIONIST, None,
-    ),
-    (
-        "Gita", "Devi", "+977-9803000004", date(2001, 7, 19),
-        Gender.FEMALE, ["Sulfa Drugs"], RegisteredBy.SELF, "gita",
-    ),
-    (
-        "Bishnu", "Karki", "+977-9841000005", date(1965, 12, 30),
-        Gender.MALE, ["None"], RegisteredBy.RECEPTIONIST, None,
-    ),
-    (
-        "Sunita", "Rai", "+977-9803000006", date(1990, 9, 8),
-        Gender.FEMALE, ["Penicillin", "Anticonvulsants"], RegisteredBy.SELF, "sunita",
-    ),
-    (
-        "Kamal", "Shrestha", "+977-9841000007", date(1985, 4, 25),
-        Gender.MALE, ["NSAIDs"], RegisteredBy.RECEPTIONIST, None,
-    ),
-    (
-        "Puja", "Tamang", "+977-9803000008", date(1998, 11, 2),
-        Gender.FEMALE, ["None"], RegisteredBy.SELF, None,
-    ),
-    (
-        "Dipesh", "Magar", "+977-9841000009", date(1973, 6, 14),
-        Gender.MALE, ["Aspirin"], RegisteredBy.RECEPTIONIST, None,
-    ),
-    (
-        "Anita", "Chaudhary", "+977-9803000010", date(2004, 1, 27),
-        Gender.FEMALE, ["Sulfa Drugs", "Penicillin"], RegisteredBy.SELF, "anita",
-    ),
+    ("Ram", "Bahadur", "+977-9841000001", date(1970, 5, 12), Gender.MALE, "O+",
+     ["Penicillin"], RegisteredBy.SELF, "ram@demo.np", Department.ENDOCRINOLOGY),
+    ("Sita", "Kumari", "+977-9803000002", date(1988, 11, 23), Gender.FEMALE, "A+",
+     [], RegisteredBy.RECEPTIONIST, None, Department.CARDIOLOGY),
+    ("Hari", "Prasad", "+977-9841000003", date(1979, 2, 3), Gender.MALE, "B+",
+     ["Aspirin"], RegisteredBy.RECEPTIONIST, None, Department.INFECTIOUS_DISEASES),
+    ("Gita", "Devi", "+977-9803000004", date(2001, 7, 19), Gender.FEMALE, "AB+",
+     [], RegisteredBy.SELF, "gita@demo.np", Department.NEPHROLOGY),
 ]
 
-
+# National IDs (10-digit) assigned in order to the demo patients.
+DEMO_NIDS = ["1234500001", "1234500002", "1234500003", "1234500004"]
 
 
 class Command(BaseCommand):
-    help = "Create demo staff (one per role) and sample patients for local testing."
+    help = "Create demo staff (one per role) and patients with full clinical history."
 
     def handle(self, *args, **options):
         self.stdout.write(self.style.MIGRATE_HEADING("Seeding demo staff..."))
         staff_by_role = {}
-        for username, full_name, role in DEMO_STAFF:
+        doctors_by_dept = {}
+        for email, full_name, role, dept in DEMO_STAFF:
             staff, created = Staff.objects.get_or_create(
-                username=username,
+                email=email,
                 defaults={
                     "full_name": full_name,
                     "role": role,
+                    "department": dept,
+                    "status": StaffStatus.ACTIVE,
+                    "is_active": True,
+                    "must_change_password": False,
                     "is_staff": role == Role.ADMIN,
                     "is_superuser": role == Role.ADMIN,
                 },
             )
-            staff_by_role[role] = staff
             if created:
                 staff.set_password(DEMO_PASSWORD)
                 staff.save()
-                self.stdout.write(
-                    self.style.SUCCESS(f"  + {username:<11} ({role})")
-                )
+                self.stdout.write(self.style.SUCCESS(f"  + {email:<20} ({role})"))
             else:
-                self.stdout.write(
-                    self.style.WARNING(f"  = {username:<11} already exists — skipped")
-                )
-
+                self.stdout.write(self.style.WARNING(f"  = {email:<20} exists — skipped"))
+            staff_by_role.setdefault(role, staff)
+            if role == Role.DOCTOR:
+                doctors_by_dept[dept] = staff
 
         self.stdout.write(self.style.MIGRATE_HEADING("Seeding demo patients..."))
-        for (
-            first, last, phone, dob, gender, allergies, reg_by, portal_username
-        ) in DEMO_PATIENTS:
-            patient = Patient.objects.filter(
-                first_name=first, last_name=last, phone_number=phone
-            ).first()
+        for idx, (
+            first, last, phone, dob, gender, blood, allergies, reg_by, portal, dept
+        ) in enumerate(DEMO_PATIENTS):
+            nid = DEMO_NIDS[idx]
+            patient = Patient.objects.filter(national_id=nid).first()
             if patient is not None:
-                self.stdout.write(
-                    self.style.WARNING(
-                        f"  = {first} {last} already exists — reusing"
-                    )
-                )
+                self.stdout.write(self.style.WARNING(f"  = {first} {last} exists — reusing"))
             else:
-                # Optionally create a linked login (role PATIENT) for the portal.
                 user = None
-                if portal_username and not Staff.objects.filter(
-                    username=portal_username
-                ).exists():
+                if portal and not Staff.objects.filter(email=portal).exists():
                     user = Staff.objects.create(
-                        username=portal_username,
+                        email=portal,
                         full_name=f"{first} {last}",
                         role=Role.PATIENT,
+                        status=StaffStatus.ACTIVE,
+                        is_active=True,
+                        must_change_password=False,
                     )
                     user.set_password(DEMO_PASSWORD)
                     user.save()
-
                 patient = Patient.objects.create(
                     user=user,
+                    national_id=nid,
                     first_name=first,
                     last_name=last,
                     phone_number=phone,
                     date_of_birth=dob,
                     gender=gender,
+                    blood_group=blood,
                     allergies=allergies,
                     registered_by=reg_by,
                 )
-                login_note = f" [portal login: {portal_username}]" if user else ""
+                note = f" [portal: {portal}]" if user else ""
                 self.stdout.write(
                     self.style.SUCCESS(
-                        f"  + {first} {last} ({patient.hospital_identifier}) "
-                        f"allergies={allergies}{login_note}"
+                        f"  + {first} {last} ({patient.hospital_identifier}) NID={nid}{note}"
                     )
                 )
-
-            # Give every demo patient some clinical history so the doctor's
-            # timeline + lab-trend charts are populated out of the box.
-            self._seed_clinical_history(patient, staff_by_role)
+            self._seed_clinical_history(patient, dept, staff_by_role, doctors_by_dept)
 
         self.stdout.write("")
+        self.stdout.write(self.style.SUCCESS("Demo data ready. Log in at /login with EMAIL:"))
+        for email, _n, role, _d in DEMO_STAFF:
+            self.stdout.write(f"    {email:<20} / {DEMO_PASSWORD}   -> {role}")
+        for *_r, portal, _d in DEMO_PATIENTS:
+            if portal:
+                self.stdout.write(f"    {portal:<20} / {DEMO_PASSWORD}   -> PATIENT")
 
-        self.stdout.write(self.style.SUCCESS("Demo data ready. Log in at /login with:"))
-        for username, _full_name, role in DEMO_STAFF:
-            self.stdout.write(f"    {username:<11} / {DEMO_PASSWORD}   -> {role}")
-        for *_rest, portal_username in DEMO_PATIENTS:
-            if portal_username:
-                self.stdout.write(
-                    f"    {portal_username:<11} / {DEMO_PASSWORD}   -> {Role.PATIENT}"
-                )
-        self.stdout.write("")
-        self.stdout.write(
-            "Tip: as 'doctor', prescribe 'Penicillin G' to Ram Bahadur to see the "
-            "red safety block; prescribe a safe drug to send it to the pharmacy queue. "
-            "Log in as 'patient' to see the read-only patient portal."
-        )
-
-    def _seed_clinical_history(self, patient, staff_by_role):
-        """
-        Create a small, realistic clinical history for a demo patient so the
-        doctor's timeline and lab-trend charts show data immediately.
-
-        Idempotent: if the patient already has observations we skip, so re-running
-        `seed_demo` doesn't pile up duplicates.
-        """
-        if LabObservation.objects.filter(patient=patient).exists():
+    def _seed_clinical_history(self, patient, dept, staff_by_role, doctors_by_dept):
+        if Encounter.objects.filter(patient=patient).exists():
             self.stdout.write(
-                self.style.WARNING(
-                    f"    = {patient.first_name}'s clinical history already seeded"
-                )
+                self.style.WARNING(f"    = {patient.first_name}'s history already seeded")
             )
             return
 
-        doctor = staff_by_role.get(Role.DOCTOR)
+        receptionist = staff_by_role.get(Role.RECEPTIONIST)
+        nurse = staff_by_role.get(Role.NURSE)
+        doctor = doctors_by_dept.get(dept) or staff_by_role.get(Role.DOCTOR)
         labtech = staff_by_role.get(Role.LAB_TECH)
         pharmacist = staff_by_role.get(Role.PHARMACIST)
         now = timezone.now()
 
-        # Three Hemoglobin readings + two WBC readings across the last ~5 weeks so
-        # the trend charts have a visible line.
+        # A closed historical encounter with vitals, diagnosis, labs, rx.
+        enc = Encounter.objects.create(
+            patient=patient,
+            department=dept,
+            attending_doctor=doctor,
+            created_by=receptionist,
+            chief_complaint="Routine follow-up and blood work.",
+            status=EncounterStatus.CLOSED,
+        )
+
+        Vitals.objects.create(
+            encounter=enc,
+            recorded_by=nurse,
+            height_cm=168,
+            weight_kg=72,
+            systolic_bp=128,
+            diastolic_bp=82,
+            pulse=78,
+            temperature_c=36.8,
+            spo2=98,
+        )
+
+        # A department-appropriate diagnosis (first ICD-10 code for the dept).
+        from core.constants import ICD10
+
+        dept_codes = list(ICD10.for_department(dept).keys())
+        if dept_codes:
+            Diagnosis.objects.create(
+                encounter=enc,
+                patient=patient,
+                diagnosed_by=doctor,
+                icd10_code=dept_codes[0],
+                clinical_status=DiagnosisStatus.ACTIVE,
+                notes="Recorded during demo seed.",
+            )
+
+        # Quantitative lab trend: 3 Hemoglobin + 2 FBS readings across ~5 weeks.
         lab_points = [
-            (LabTest.HEMOGLOBIN, "12.10", 35),
-            (LabTest.HEMOGLOBIN, "13.40", 21),
-            (LabTest.HEMOGLOBIN, "14.20", 3),
-            (LabTest.WBC, "6.50", 21),
-            (LabTest.WBC, "7.10", 3),
+            ("HEMOGLOBIN", "12.10", 35),
+            ("HEMOGLOBIN", "13.40", 21),
+            ("HEMOGLOBIN", "14.20", 3),
+            ("FBS", "95.00", 21),
+            ("FBS", "110.00", 3),
         ]
-        for test_name, value, days_ago in lab_points:
+        for test_code, value, days_ago in lab_points:
             order = LabOrder.objects.create(
+                encounter=enc,
                 patient=patient,
                 ordered_by=doctor,
-                test_name=test_name,
+                test_code=test_code,
                 status=LabOrderStatus.COMPLETED,
             )
-            obs = LabObservation.objects.create(
-                patient=patient,
+            report = LabReport.objects.create(
                 lab_order=order,
+                patient=patient,
                 entered_by=labtech,
-                test_name=test_name,
+                status=LabReport.CONFIRMED,
+            )
+            res = LabResult.objects.create(
+                lab_report=report,
+                patient=patient,
+                test_code=test_code,
                 result_value=value,
             )
-            # created_at is auto_now_add, so backdate it explicitly for the chart.
             stamp = now - timedelta(days=days_ago)
-            LabObservation.objects.filter(pk=obs.pk).update(created_at=stamp)
+            LabResult.objects.filter(pk=res.pk).update(created_at=stamp)
             LabOrder.objects.filter(pk=order.pk).update(created_at=stamp)
 
-        # A couple of prescriptions (safe drugs — no allergy conflict). One is
-        # already fulfilled, one still active/queued for the pharmacist.
+        # A report-type result (blood group).
+        order = LabOrder.objects.create(
+            encounter=enc, patient=patient, ordered_by=doctor,
+            test_code="BLOOD_GROUP", status=LabOrderStatus.COMPLETED,
+        )
+        report = LabReport.objects.create(
+            lab_order=order, patient=patient, entered_by=labtech,
+            status=LabReport.CONFIRMED,
+        )
+        LabResult.objects.create(
+            lab_report=report, patient=patient, test_code="BLOOD_GROUP",
+            report_text=f"Blood group {patient.blood_group}.",
+        )
+
+        # Prescriptions: one fulfilled, one active in the pharmacy queue.
         rx_data = [
             ("Paracetamol 500mg", "1 tablet every 6 hours for 3 days",
              PrescriptionStatus.COMPLETED, 20),
-            ("Amlodipine 5mg", "1 tablet once daily",
-             PrescriptionStatus.ACTIVE, 2),
+            ("Amlodipine 5mg", "1 tablet once daily", PrescriptionStatus.ACTIVE, 2),
         ]
         for med, dosage, rx_status, days_ago in rx_data:
             rx = Prescription.objects.create(
+                encounter=enc,
                 patient=patient,
                 prescribed_by=doctor,
                 medication_name=med,
@@ -257,20 +267,12 @@ class Command(BaseCommand):
                 status=rx_status,
             )
             stamp = now - timedelta(days=days_ago)
-            fields = {"created_at": stamp}
             if rx_status == PrescriptionStatus.COMPLETED:
                 rx.fulfilled_by = pharmacist
                 rx.fulfilled_at = stamp
                 rx.save(update_fields=["fulfilled_by", "fulfilled_at"])
-                fields["updated_at"] = stamp
-            Prescription.objects.filter(pk=rx.pk).update(**fields)
+            Prescription.objects.filter(pk=rx.pk).update(created_at=stamp)
 
         self.stdout.write(
-            self.style.SUCCESS(
-                f"    + clinical history for {patient.first_name}: "
-                f"{len(lab_points)} lab results, {len(rx_data)} prescriptions"
-            )
+            self.style.SUCCESS(f"    + clinical history for {patient.first_name}")
         )
-
-
-
