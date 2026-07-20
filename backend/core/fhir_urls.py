@@ -11,11 +11,7 @@ from . import views
 app_name = "fhir"
 
 urlpatterns = [
-    path(
-        "Patient/<uuid:pk>/",
-        views.FHIRPatientView.as_view(),
-        name="fhir_patient",
-    ),
+    path("Patient/<uuid:pk>/", views.FHIRPatientView.as_view(), name="fhir_patient"),
     path(
         "Patient/<uuid:pk>/$everything/",
         views.FHIRPatientEverythingView.as_view(),
@@ -25,5 +21,10 @@ urlpatterns = [
         "Observation/<uuid:pk>/",
         views.FHIRObservationView.as_view(),
         name="fhir_observation",
+    ),
+    path(
+        "Condition/<uuid:pk>/",
+        views.FHIRConditionView.as_view(),
+        name="fhir_condition",
     ),
 ]

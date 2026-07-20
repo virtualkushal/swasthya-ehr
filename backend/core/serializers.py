@@ -1,26 +1,85 @@
 """
-Serializers for SwasthyaEHR.
+Serializers for SwasthyaEHR (v2 — multi-department OPD).
 
-Covers: staff management (admin), JWT login carrying the user's role, patient
-registration (self + receptionist), and prescriptions (the drug-allergy safety
-check lives in the view, inside an atomic transaction).
+Backend is the source of truth for validation (REQ-V1..V3). Login is by email.
+Staff self-register (PENDING) and an admin approves them. Patients register a
+profile and get a linked login account.
 """
 
+import re
+from datetime import date
+
 from django.contrib.auth import get_user_model
-from rest_framework import serializers
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth.tokens import default_token_generator
-from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
-from django.utils.encoding import force_bytes, force_str
+from django.utils.encoding import force_str
+from django.utils.http import urlsafe_base64_decode
+from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-
-from .constants import ALLERGEN_VOCABULARY, ICD10, LabTest, Role
-from .models import Diagnosis, LabObservation, LabOrder, Patient, Prescription
-
-
+from .constants import (
+    BloodGroup,
+    Department,
+    ICD10,
+    LabResultType,
+    LabTestCatalog,
+    Role,
+    StaffStatus,
+)
+from .models import (
+    AccessRequest,
+    Diagnosis,
+    Encounter,
+    LabOrder,
+    LabReport,
+    LabResult,
+    Patient,
+    Prescription,
+    Vitals,
+)
 
 Staff = get_user_model()
+
+# --------------------------------------------------------------------------- #
+# Reusable field validators
+# --------------------------------------------------------------------------- #
+
+NAME_RE = re.compile(r"^[A-Za-z][A-Za-z\s.'-]{1,49}$")
+# Nepali mobile: +977-98XXXXXXXX or 98XXXXXXXX (10 digits starting 97/98).
+PHONE_RE = re.compile(r"^(\+977[-\s]?)?9[78]\d{8}$")
+NID_RE = re.compile(r"^\d{10,12}$")
+
+
+def validate_person_name(value):
+    value = (value or "").strip()
+    if not NAME_RE.match(value):
+        raise serializers.ValidationError(
+            "Must be 2–50 letters (spaces, hyphen, apostrophe allowed)."
+        )
+    return value
+
+
+def validate_phone(value):
+    value = (value or "").strip()
+    if not PHONE_RE.match(value):
+        raise serializers.ValidationError(
+            "Enter a valid Nepali mobile number, e.g. +977-9841234567."
+        )
+    return value
+
+
+def validate_dob(value):
+    if value > date.today():
+        raise serializers.ValidationError("Date of birth cannot be in the future.")
+    age = (date.today() - value).days // 365
+    if age > 120:
+        raise serializers.ValidationError("Age cannot exceed 120 years.")
+    return value
+
+
+# --------------------------------------------------------------------------- #
+# Staff / auth
+# --------------------------------------------------------------------------- #
 
 
 class StaffSerializer(serializers.ModelSerializer):
@@ -30,10 +89,12 @@ class StaffSerializer(serializers.ModelSerializer):
         model = Staff
         fields = [
             "id",
-            "username",
-            "full_name",
             "email",
+            "full_name",
             "role",
+            "department",
+            "status",
+            "must_change_password",
             "is_active",
             "created_at",
             "updated_at",
@@ -41,35 +102,88 @@ class StaffSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at", "updated_at"]
 
 
-class StaffCreateSerializer(serializers.ModelSerializer):
-    """Create a staff account. Password is write-only and properly hashed."""
-
-    password = serializers.CharField(write_only=True, min_length=8)
+class StaffRegisterSerializer(serializers.ModelSerializer):
+    """
+    Public staff self-registration. Creates a PENDING account with no usable
+    password (set on admin approval). Admin/patient roles cannot self-register.
+    """
 
     class Meta:
         model = Staff
-        fields = ["id", "username", "full_name", "email", "role", "password", "is_active"]
+        fields = ["id", "email", "full_name", "role", "department"]
+        read_only_fields = ["id"]
+
+    def validate_full_name(self, value):
+        return validate_person_name(value)
+
+    def validate_email(self, value):
+        value = value.lower().strip()
+        if Staff.objects.filter(email=value).exists():
+            raise serializers.ValidationError("An account with this email exists.")
+        return value
+
+    def validate_role(self, value):
+        if value not in Role.STAFF_ROLES:
+            raise serializers.ValidationError(
+                "You can only self-register as a clinical staff role."
+            )
+        return value
+
+    def validate(self, attrs):
+        if attrs.get("role") == Role.DOCTOR and not attrs.get("department"):
+            raise serializers.ValidationError(
+                {"department": "A doctor must select a department."}
+            )
+        return attrs
+
+    def create(self, validated_data):
+        staff = Staff(
+            **validated_data,
+            status=StaffStatus.PENDING,
+            is_active=False,  # cannot log in until approved
+            must_change_password=True,
+        )
+        staff.set_unusable_password()
+        staff.save()
+        return staff
+
+
+class StaffCreateSerializer(serializers.ModelSerializer):
+    """ADMIN-created staff account (immediately ACTIVE)."""
+
+    password = serializers.CharField(write_only=True, min_length=8, required=False)
+
+    class Meta:
+        model = Staff
+        fields = ["id", "email", "full_name", "role", "department", "password"]
         read_only_fields = ["id"]
 
     def validate_role(self, value):
-        valid = {choice[0] for choice in Role.CHOICES}
+        valid = {c[0] for c in Role.CHOICES}
         if value not in valid:
             raise serializers.ValidationError(f"'{value}' is not a valid role.")
         return value
 
     def create(self, validated_data):
-        password = validated_data.pop("password")
-        staff = Staff(**validated_data)
-        staff.set_password(password)
+        password = validated_data.pop("password", None)
+        staff = Staff(
+            **validated_data,
+            status=StaffStatus.ACTIVE,
+            is_active=True,
+            must_change_password=bool(password is None),
+        )
+        if password:
+            staff.set_password(password)
+        else:
+            staff.set_unusable_password()
         staff.save()
         return staff
 
 
 class LoginSerializer(TokenObtainPairSerializer):
-    """
-    JWT login. Embeds role + identity into the token and also returns a `user`
-    object in the response body so the SPA can set up its session immediately.
-    """
+    """Email + password login. Embeds role + identity in the token."""
+
+    username_field = "email"
 
     @classmethod
     def get_token(cls, user):
@@ -80,32 +194,44 @@ class LoginSerializer(TokenObtainPairSerializer):
 
     def validate(self, attrs):
         data = super().validate(attrs)
+        if self.user.status == StaffStatus.PENDING:
+            raise serializers.ValidationError(
+                "Your account is awaiting administrator approval."
+            )
         data["user"] = {
             "id": str(self.user.id),
-            "username": self.user.username,
+            "email": self.user.email,
             "full_name": self.user.full_name,
             "role": self.user.role,
+            "department": self.user.department,
+            "must_change_password": self.user.must_change_password,
         }
         return data
 
 
+class ChangePasswordSerializer(serializers.Serializer):
+    """Authenticated user sets a new password (clears must_change_password)."""
+
+    old_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True, min_length=8)
+
+    def validate_old_password(self, value):
+        user = self.context["request"].user
+        if not user.check_password(value):
+            raise serializers.ValidationError("Current password is incorrect.")
+        return value
+
+
+# --------------------------------------------------------------------------- #
+# Patient
+# --------------------------------------------------------------------------- #
+
+
 class PatientSerializer(serializers.ModelSerializer):
-    """
-    Create/read a patient profile.
+    """Create/read a patient profile with full backend validation."""
 
-    `allergies` is validated against the fixed vocabulary so the safety engine's
-    substring match stays reliable (REQ-004/005). `registered_by` and
-    `hospital_identifier` are set by the server, never trusted from the client.
-
-    Optional `username`/`password` (write-only) let a self-registering patient
-    create a login for the read-only portal. When provided, the view creates a
-    linked Staff account with role PATIENT.
-    """
-
-    username = serializers.CharField(write_only=True, required=False, allow_blank=True)
-    password = serializers.CharField(
-        write_only=True, required=False, allow_blank=True, min_length=8
-    )
+    email = serializers.EmailField(write_only=True, required=False, allow_blank=True)
+    age = serializers.SerializerMethodField(read_only=True)
     has_login = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
@@ -113,67 +239,334 @@ class PatientSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "hospital_identifier",
+            "national_id",
             "first_name",
             "last_name",
             "phone_number",
             "date_of_birth",
+            "age",
             "gender",
+            "blood_group",
             "allergies",
+            "address",
+            "emergency_contact_name",
+            "emergency_contact_phone",
+            "marital_status",
+            "occupation",
             "registered_by",
-            "username",
-            "password",
+            "email",
             "has_login",
             "created_at",
         ]
-        read_only_fields = ["id", "hospital_identifier", "registered_by", "created_at"]
+        read_only_fields = [
+            "id",
+            "hospital_identifier",
+            "registered_by",
+            "created_at",
+        ]
+
+    def get_age(self, obj):
+        if obj.date_of_birth:
+            return (date.today() - obj.date_of_birth).days // 365
+        return None
 
     def get_has_login(self, obj):
         return obj.user_id is not None
 
+    def validate_first_name(self, value):
+        return validate_person_name(value)
+
+    def validate_last_name(self, value):
+        return validate_person_name(value)
+
+    def validate_phone_number(self, value):
+        return validate_phone(value)
+
+    def validate_date_of_birth(self, value):
+        return validate_dob(value)
+
+    def validate_national_id(self, value):
+        value = (value or "").strip()
+        if not NID_RE.match(value):
+            raise serializers.ValidationError(
+                "National ID must be 10–12 digits."
+            )
+        qs = Patient.objects.filter(national_id=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError(
+                "A patient with this National ID already exists."
+            )
+        return value
+
+    def validate_blood_group(self, value):
+        if value not in BloodGroup.VALUES:
+            raise serializers.ValidationError("Invalid blood group.")
+        return value
+
+    def validate_allergies(self, value):
+        """Free-text allergies (v2): a list of non-empty strings."""
+        if value in (None, ""):
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Allergies must be a list of strings.")
+        cleaned = []
+        for item in value:
+            text = str(item).strip()
+            if text:
+                cleaned.append(text[:100])
+        return cleaned
+
+    def validate_email(self, value):
+        value = (value or "").lower().strip()
+        if value and Staff.objects.filter(email=value).exists():
+            raise serializers.ValidationError("This email is already registered.")
+        return value
+
+
+# --------------------------------------------------------------------------- #
+# Encounter & Vitals
+# --------------------------------------------------------------------------- #
+
+
+class EncounterSerializer(serializers.ModelSerializer):
+    patient_name = serializers.SerializerMethodField(read_only=True)
+    hospital_identifier = serializers.CharField(
+        source="patient.hospital_identifier", read_only=True
+    )
+    doctor_name = serializers.CharField(
+        source="attending_doctor.full_name", read_only=True, default=None
+    )
+    department_display = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = Encounter
+        fields = [
+            "id",
+            "patient",
+            "patient_name",
+            "hospital_identifier",
+            "department",
+            "department_display",
+            "attending_doctor",
+            "doctor_name",
+            "created_by",
+            "visit_type",
+            "chief_complaint",
+            "status",
+            "visit_date",
+            "created_at",
+        ]
+        read_only_fields = ["id", "created_by", "status", "visit_date", "created_at"]
+
+    def get_patient_name(self, obj):
+        return f"{obj.patient.first_name} {obj.patient.last_name}"
+
+    def get_department_display(self, obj):
+        return dict(Department.CHOICES).get(obj.department, obj.department)
+
     def validate(self, attrs):
-        """If a username is supplied, a password is required and must be unique."""
-        username = (attrs.get("username") or "").strip()
-        password = attrs.get("password") or ""
-        if username or password:
-            if not username:
+        doctor = attrs.get("attending_doctor")
+        dept = attrs.get("department")
+        if doctor is not None:
+            if doctor.role != Role.DOCTOR:
                 raise serializers.ValidationError(
-                    {"username": "A username is required to create a login."}
+                    {"attending_doctor": "Selected staff is not a doctor."}
                 )
-            if not password:
+            if dept and doctor.department and doctor.department != dept:
                 raise serializers.ValidationError(
-                    {"password": "A password is required to create a login."}
-                )
-            if Staff.objects.filter(username=username).exists():
-                raise serializers.ValidationError(
-                    {"username": "That username is already taken."}
+                    {"attending_doctor": "Doctor belongs to a different department."}
                 )
         return attrs
 
-    def validate_allergies(self, value):
 
-        if not isinstance(value, list):
-            raise serializers.ValidationError("Allergies must be a list.")
-        allowed = set(ALLERGEN_VOCABULARY)
-        for item in value:
-            if item not in allowed:
+class VitalsSerializer(serializers.ModelSerializer):
+    recorded_by_name = serializers.CharField(
+        source="recorded_by.full_name", read_only=True
+    )
+
+    class Meta:
+        model = Vitals
+        fields = [
+            "id",
+            "encounter",
+            "recorded_by",
+            "recorded_by_name",
+            "height_cm",
+            "weight_kg",
+            "bmi",
+            "systolic_bp",
+            "diastolic_bp",
+            "pulse",
+            "temperature_c",
+            "spo2",
+            "created_at",
+        ]
+        read_only_fields = ["id", "recorded_by", "bmi", "created_at"]
+
+    def _range(self, attrs, field, lo, hi, label):
+        val = attrs.get(field)
+        if val is not None and (float(val) < lo or float(val) > hi):
+            raise serializers.ValidationError(
+                {field: f"{label} must be between {lo} and {hi}."}
+            )
+
+    def validate(self, attrs):
+        self._range(attrs, "height_cm", 30, 250, "Height (cm)")
+        self._range(attrs, "weight_kg", 1, 400, "Weight (kg)")
+        self._range(attrs, "systolic_bp", 50, 300, "Systolic BP")
+        self._range(attrs, "diastolic_bp", 30, 200, "Diastolic BP")
+        self._range(attrs, "pulse", 20, 250, "Pulse")
+        self._range(attrs, "temperature_c", 30, 45, "Temperature (°C)")
+        self._range(attrs, "spo2", 50, 100, "SpO₂")
+        sys_bp = attrs.get("systolic_bp")
+        dia_bp = attrs.get("diastolic_bp")
+        if sys_bp is not None and dia_bp is not None and dia_bp >= sys_bp:
+            raise serializers.ValidationError(
+                {"diastolic_bp": "Diastolic BP must be lower than systolic BP."}
+            )
+        return attrs
+
+
+# --------------------------------------------------------------------------- #
+# Lab: catalog, orders, reports, results
+# --------------------------------------------------------------------------- #
+
+
+class LabOrderSerializer(serializers.ModelSerializer):
+    patient_name = serializers.SerializerMethodField(read_only=True)
+    ordered_by_name = serializers.CharField(
+        source="ordered_by.full_name", read_only=True
+    )
+
+    class Meta:
+        model = LabOrder
+        fields = [
+            "id",
+            "encounter",
+            "patient",
+            "patient_name",
+            "ordered_by",
+            "ordered_by_name",
+            "test_code",
+            "test_name",
+            "category",
+            "loinc_code",
+            "status",
+            "priority",
+            "created_at",
+        ]
+        read_only_fields = [
+            "id",
+            "ordered_by",
+            "test_name",
+            "category",
+            "loinc_code",
+            "status",
+            "created_at",
+        ]
+
+    def get_patient_name(self, obj):
+        return f"{obj.patient.first_name} {obj.patient.last_name}"
+
+    def validate_test_code(self, value):
+        if not LabTestCatalog.is_valid(value):
+            raise serializers.ValidationError("Unknown lab test code.")
+        return value
+
+
+class LabResultSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LabResult
+        fields = [
+            "id",
+            "lab_report",
+            "patient",
+            "test_code",
+            "test_name",
+            "category",
+            "result_type",
+            "loinc_code",
+            "result_value",
+            "result_unit",
+            "reference_low",
+            "reference_high",
+            "flag",
+            "report_text",
+            "created_at",
+        ]
+        read_only_fields = [
+            "id",
+            "test_name",
+            "category",
+            "result_type",
+            "loinc_code",
+            "result_unit",
+            "reference_low",
+            "reference_high",
+            "flag",
+            "created_at",
+        ]
+
+    def validate_test_code(self, value):
+        if not LabTestCatalog.is_valid(value):
+            raise serializers.ValidationError("Unknown lab test code.")
+        return value
+
+    def validate(self, attrs):
+        meta = LabTestCatalog.get(attrs.get("test_code"))
+        if not meta:
+            return attrs
+        if meta["type"] == LabResultType.QUANTITATIVE:
+            val = attrs.get("result_value")
+            if val is None:
                 raise serializers.ValidationError(
-                    f"'{item}' is not an allowed allergen. "
-                    f"Choose from: {', '.join(ALLERGEN_VOCABULARY)}."
+                    {"result_value": "A numeric result is required for this test."}
                 )
-        # "None" means no allergies; store it as an empty list for clean matching.
-        if value == ["None"]:
-            return []
-        # If "None" is combined with real allergens, drop the "None" token.
-        return [item for item in value if item != "None"]
+            if float(val) < 0:
+                raise serializers.ValidationError(
+                    {"result_value": "Result cannot be negative."}
+                )
+        else:
+            if not (attrs.get("report_text") or "").strip():
+                raise serializers.ValidationError(
+                    {"report_text": "A report/conclusion is required for this test."}
+                )
+        return attrs
+
+
+class LabReportSerializer(serializers.ModelSerializer):
+    """A lab submission: order reference + one or more results (nested write)."""
+
+    results = LabResultSerializer(many=True)
+    entered_by_name = serializers.CharField(
+        source="entered_by.full_name", read_only=True
+    )
+
+    class Meta:
+        model = LabReport
+        fields = [
+            "id",
+            "lab_order",
+            "patient",
+            "entered_by",
+            "entered_by_name",
+            "pdf_file",
+            "source",
+            "status",
+            "results",
+            "created_at",
+        ]
+        read_only_fields = ["id", "patient", "entered_by", "status", "created_at"]
+
+
+# --------------------------------------------------------------------------- #
+# Prescription & Diagnosis
+# --------------------------------------------------------------------------- #
 
 
 class PrescriptionSerializer(serializers.ModelSerializer):
-    """
-    Read/create a prescription. On create, only patient + medication + dosage
-    are accepted from the client; prescriber, status and safety are handled by
-    the view. Includes a couple of read-only convenience fields for the UI.
-    """
-
     patient_name = serializers.SerializerMethodField(read_only=True)
     prescribed_by_name = serializers.CharField(
         source="prescribed_by.full_name", read_only=True
@@ -183,6 +576,7 @@ class PrescriptionSerializer(serializers.ModelSerializer):
         model = Prescription
         fields = [
             "id",
+            "encounter",
             "patient",
             "patient_name",
             "medication_name",
@@ -207,123 +601,7 @@ class PrescriptionSerializer(serializers.ModelSerializer):
         return f"{obj.patient.first_name} {obj.patient.last_name}"
 
 
-class LabOrderSerializer(serializers.ModelSerializer):
-    """
-    Read/create a lab order (a doctor's request for a test).
-
-    On create only patient + test_name are accepted; loinc_code is derived by
-    the model, and ordered_by is stamped from the authenticated user in the
-    view. `test_name` must be one of the three supported tests.
-    """
-
-    patient_name = serializers.SerializerMethodField(read_only=True)
-    ordered_by_name = serializers.CharField(
-        source="ordered_by.full_name", read_only=True
-    )
-
-    class Meta:
-        model = LabOrder
-        fields = [
-            "id",
-            "patient",
-            "patient_name",
-            "test_name",
-            "loinc_code",
-            "status",
-            "priority",
-            "ordered_by",
-            "ordered_by_name",
-            "created_at",
-        ]
-        read_only_fields = [
-            "id",
-            "loinc_code",
-            "status",
-            "ordered_by",
-            "created_at",
-        ]
-
-    def get_patient_name(self, obj):
-        return f"{obj.patient.first_name} {obj.patient.last_name}"
-
-
-class LabObservationSerializer(serializers.ModelSerializer):
-    """
-    Read/create a lab result entered by a lab technician.
-
-    Enforces REQ-008/009: `test_name` must be supported, and `result_value`
-    must be a number inside the test's valid clinical range. loinc_code and
-    result_unit are derived by the model; entered_by is stamped in the view.
-    """
-
-    patient_name = serializers.SerializerMethodField(read_only=True)
-    entered_by_name = serializers.CharField(
-        source="entered_by.full_name", read_only=True
-    )
-
-    class Meta:
-        model = LabObservation
-        fields = [
-            "id",
-            "patient",
-            "lab_order",
-            "test_name",
-            "loinc_code",
-            "result_value",
-            "result_unit",
-            "patient_name",
-            "entered_by",
-            "entered_by_name",
-            "created_at",
-        ]
-        read_only_fields = [
-            "id",
-            "loinc_code",
-            "result_unit",
-            "entered_by",
-            "created_at",
-        ]
-
-    def get_patient_name(self, obj):
-        return f"{obj.patient.first_name} {obj.patient.last_name}"
-
-    def validate_test_name(self, value):
-        if value not in LabTest.REFERENCE:
-            raise serializers.ValidationError(
-                f"'{value}' is not a supported test. "
-                f"Choose from: {', '.join(LabTest.REFERENCE)}."
-            )
-        return value
-
-    def validate(self, attrs):
-        """Cross-field check: result_value must sit inside the test's range."""
-        test_name = attrs.get("test_name")
-        result_value = attrs.get("result_value")
-        ref = LabTest.REFERENCE.get(test_name)
-        if ref and result_value is not None:
-            value = float(result_value)
-            if value < ref["min"] or value > ref["max"]:
-                raise serializers.ValidationError(
-                    {
-                        "result_value": (
-                            f"{value} is outside the valid range for "
-                            f"{test_name} ({ref['min']}–{ref['max']} {ref['unit']})."
-                        )
-                    }
-                )
-        return attrs
-
-
 class DiagnosisSerializer(serializers.ModelSerializer):
-    """
-    Read/create a diagnosis (problem-list entry).
-
-    On create, the client sends `patient` + `icd10_code` (+ optional onset_date
-    / notes). `disease_name` is derived from the ICD-10 table, and `diagnosed_by`
-    is stamped from the authenticated doctor in the view. `clinical_status` is
-    read-only here (resolving is done via a dedicated action).
-    """
-
     patient_name = serializers.SerializerMethodField(read_only=True)
     diagnosed_by_name = serializers.CharField(
         source="diagnosed_by.full_name", read_only=True
@@ -333,6 +611,7 @@ class DiagnosisSerializer(serializers.ModelSerializer):
         model = Diagnosis
         fields = [
             "id",
+            "encounter",
             "patient",
             "patient_name",
             "icd10_code",
@@ -365,14 +644,33 @@ class DiagnosisSerializer(serializers.ModelSerializer):
         return value
 
 
+# --------------------------------------------------------------------------- #
+# Access requests (cross-hospital sharing)
+# --------------------------------------------------------------------------- #
+
+
+class AccessRequestSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AccessRequest
+        fields = [
+            "id",
+            "national_id",
+            "requester_label",
+            "status",
+            "expires_at",
+            "approved_at",
+            "created_at",
+        ]
+        read_only_fields = ["id", "status", "expires_at", "approved_at", "created_at"]
+
+
+# --------------------------------------------------------------------------- #
+# Password reset
+# --------------------------------------------------------------------------- #
+
+
 class PasswordResetRequestSerializer(serializers.Serializer):
-
     email = serializers.EmailField()
-
-    def validate_email(self, value):
-        # For security, don't reveal if email exists or not
-        # We just return the value – the view will handle the lookup silently
-        return value
 
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
@@ -392,4 +690,3 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
         attrs["user"] = user
         return attrs
-
