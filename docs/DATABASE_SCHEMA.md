@@ -1,12 +1,13 @@
-# Database Schema Specification
-## Project: SwasthyaEHR — FHIR-Enabled Hospital EHR & Pharmacy Safety System
+# Database Schema Specification (v2)
+## Project: SwasthyaEHR — Multi-Department Hospital OPD EHR & FHIR Sharing
 
 > **This is the single source of truth for the database.** Every Django model,
 > serializer, API payload, and FHIR mapping must match the tables below. If any
-> other document contradicts this file, **this file wins** — raise an issue instead
-> of guessing.
+> other document contradicts this file, **this file wins** — raise an issue
+> instead of guessing.
 
 **Engine:** PostgreSQL 16.x · **ORM:** Django 5.x
+**Scope:** OPD only (IPD = future work). 7 clinical departments, 7 lab categories.
 
 ---
 
@@ -14,64 +15,66 @@
 
 | Table (Django model) | Purpose |
 | :-- | :-- |
-| `core_staff` (`Staff`) | Hospital employees who log in (admin, doctor, lab tech, pharmacist, receptionist). |
-| `core_patient` (`Patient`) | Patient demographics + allergies. |
-| `core_laborder` (`LabOrder`) | A doctor's request for a lab test (the "to-do" for the lab). |
-| `core_labobservation` (`LabObservation`) | The completed lab result entered by a lab tech. |
-| `core_prescription` (`Prescription`) | A medication order written by a doctor. |
+| `core_staff` (`Staff`) | All login accounts (admin, receptionist, nurse, doctor, lab tech, pharmacist, patient). Custom user model. |
+| `core_patient` (`Patient`) | Patient demographics, NID, blood group, free-text allergies. |
+| `core_encounter` (`Encounter`) | One OPD visit. The backbone that ties vitals, diagnoses, orders, prescriptions together. |
+| `core_vitals` (`Vitals`) | Vitals recorded by a nurse for an encounter (BP, pulse, temp, SpO₂, height, weight, BMI). |
+| `core_laborder` (`LabOrder`) | A doctor's request for a test from the catalog (the lab's to-do). |
+| `core_labreport` (`LabReport`) | A lab submission for an order: optional uploaded PDF + status. |
+| `core_labresult` (`LabResult`) | One test's result (quantitative value+range+flag, OR report text). |
+| `core_prescription` (`Prescription`) | A medication order written by a doctor, fulfilled by a pharmacist. |
+| `core_diagnosis` (`Diagnosis`) | An ICD-10 coded condition recorded by a doctor. |
+| `core_accessrequest` (`AccessRequest`) | Cross-hospital FHIR share request awaiting patient approval. |
 
 **Relationships (plain English):**
-- A `Patient` can have many `LabOrder`s, many `LabObservation`s, and many `Prescription`s.
-- A `LabOrder` (from a Doctor) can be fulfilled by one `LabObservation` (from a Lab Tech).
-- A `Prescription` is written by a `Staff` (doctor) and fulfilled by a `Staff` (pharmacist).
+- A `Patient` has many `Encounter`s.
+- An `Encounter` belongs to one department, one attending doctor; has one `Vitals`,
+  and many `Diagnosis` / `LabOrder` / `Prescription` rows.
+- A `LabOrder` is fulfilled by one `LabReport`, which holds many `LabResult`s.
+- A `Prescription` is written by a doctor (`Staff`) and fulfilled by a pharmacist (`Staff`).
+- An `AccessRequest` targets a `Patient` (by NID) and is approved/denied by that patient.
 
 ```
-Staff (doctor) ──writes──► Prescription ──for──► Patient
-Staff (doctor) ──creates─► LabOrder ──────for──► Patient
-LabOrder ──fulfilled by──► LabObservation ──for► Patient
-Staff (pharmacist) ─fulfills─► Prescription
+Patient ──has──► Encounter ──in──► Department
+Encounter ──has one──► Vitals (by Nurse)
+Encounter ──has many──► Diagnosis (ICD-10, by Doctor)
+Encounter ──has many──► LabOrder (by Doctor) ──fulfilled by──► LabReport ──has──► LabResult(s)
+Encounter ──has many──► Prescription (by Doctor) ──fulfilled by──► Pharmacist
+Patient ◄──approves── AccessRequest (from external hospital)
 ```
 
 ---
 
-## 2. Conventions (apply to every table)
+## 2. Conventions (every table)
 
-- **Primary key:** every table uses a `UUIDv4` field named `id` (never expose sequential
-  integer IDs on public routes). In Django:
-  `id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)`
-- **Timestamps:** every table has:
-  - `created_at = models.DateTimeField(auto_now_add=True)`
-  - `updated_at = models.DateTimeField(auto_now=True)`
-- **Enums:** stored as `CharField(choices=...)` with UPPER_SNAKE_CASE values.
+- **Primary key:** `id = UUIDField(primary_key=True, default=uuid.uuid4, editable=False)`.
+- **Timestamps:** `created_at = DateTimeField(auto_now_add=True)`, `updated_at = DateTimeField(auto_now=True)`.
+- **Enums:** `CharField(choices=...)` with UPPER_SNAKE_CASE values (see `core/constants.py`).
+- **Validation:** enforced in DRF serializers (backend is the source of truth, not the UI).
 
 ---
 
-## 3. `core_staff` (model `Staff`)
+## 3. `core_staff` (model `Staff`) — custom user
 
-Staff extend Django's authentication. Recommended approach: a **custom User model**
-(`AbstractUser`) so `role` lives on the user and JWT can read it directly.
+Extends `AbstractUser`. **Login is by email for everyone** (`USERNAME_FIELD = "email"`).
 
 | Column | Type | Constraints | Notes |
 | :-- | :-- | :-- | :-- |
 | `id` | UUID | PK | |
-| `username` | varchar(150) | unique, required | login handle |
-| `password` | varchar | required | Django-hashed, never stored plain |
+| `email` | varchar(254) | unique, required | the login identifier |
+| `password` | varchar | required | Django-hashed |
 | `full_name` | varchar(255) | required | display name |
-| `email` | varchar(254) | optional, unique-if-present | |
-| `role` | varchar(20) | required, choices | see Role enum below |
-| `is_active` | boolean | default `true` | deactivate = soft delete of a key |
-| `created_at` | timestamptz | auto | |
-| `updated_at` | timestamptz | auto | |
+| `role` | varchar(20) | required, choices | `ADMIN` / `RECEPTIONIST` / `NURSE` / `DOCTOR` / `LAB_TECH` / `PHARMACIST` / `PATIENT` |
+| `department` | varchar(30) | optional, choices | required for DOCTOR; the department they work in |
+| `status` | varchar(20) | default `PENDING` | `PENDING` → `ACTIVE` → (or `REJECTED`); staff self-register and admin approves |
+| `must_change_password` | boolean | default `true` | forces password change on first login |
+| `is_active` | boolean | default `true` | soft-disable |
+| `created_at` / `updated_at` | timestamptz | auto | |
 
-**Role enum (`role`):**
-```
-ADMIN | RECEPTIONIST | DOCTOR | LAB_TECH | PHARMACIST | PATIENT
-```
-> `PATIENT` accounts are optional in v1 — patients can self-register a *profile*
-> (a `core_patient` row) without necessarily having a login. If you implement the
-> patient portal login, a `Staff`-like auth row with `role=PATIENT` links to their
-> `core_patient` record via `patient_id`. Keep this simple: for v1 the portal can be
-> a stretch goal; receptionist/doctor flows are the priority.
+- `username` is kept (Django internal) but auto-derived from email; not used for login.
+- **Onboarding:** staff self-register (`status=PENDING`, cannot log in) → admin approves
+  (`status=ACTIVE`, password auto-generated + emailed) → forced change on first login.
+- **First admin** is created by the `seed_admin` management command.
 
 ---
 
@@ -79,143 +82,222 @@ ADMIN | RECEPTIONIST | DOCTOR | LAB_TECH | PHARMACIST | PATIENT
 
 | Column | Type | Constraints | Notes |
 | :-- | :-- | :-- | :-- |
-| `id` | UUID | PK | internal key |
-| `hospital_identifier` | varchar(20) | unique, auto-generated | format `HOSP-YYYY-NNNNN` |
-| `first_name` | varchar(100) | required | |
-| `last_name` | varchar(100) | required | |
-| `phone_number` | varchar(20) | required | e.g. `+977-98XXXXXXXX` |
-| `date_of_birth` | date | required | `YYYY-MM-DD` |
-| `gender` | varchar(10) | required, choices | `male` / `female` / `other` / `unknown` (lowercase — FHIR requirement) |
-| `allergies` | JSONB | default `[]` | **array of fixed allergen strings** — see §7 |
-| `registered_by` | varchar(20) | required | `SELF` (public form) or `RECEPTIONIST` |
-| `created_at` | timestamptz | auto | |
-| `updated_at` | timestamptz | auto | |
+| `id` | UUID | PK | |
+| `user` | FK → `core_staff` | null, OneToOne | linked login account (role PATIENT) |
+| `hospital_identifier` | varchar(20) | unique, auto | `HOSP-YYYY-NNNNN` |
+| `national_id` | varchar(20) | unique, required | Nepal NIN; digits only, 10–12 digits (spec TBD) |
+| `first_name` / `last_name` | varchar(100) | required | letters/spaces, 2–50 |
+| `phone_number` | varchar(20) | required | Nepali format `+977-98XXXXXXXX` |
+| `date_of_birth` | date | required | not future; age 0–120 |
+| `gender` | varchar(10) | required, choices | `male`/`female`/`other`/`unknown` (lowercase — FHIR) |
+| `blood_group` | varchar(10) | required, choices | 8 ABO/Rh groups + `UNKNOWN` (patient-declared) |
+| `allergies` | JSONB | default `[]` | **free-text** array of strings (display as red banner; no blocking) |
+| `address` | varchar(255) | optional | |
+| `emergency_contact_name` | varchar(120) | optional | |
+| `emergency_contact_phone` | varchar(20) | optional | |
+| `marital_status` | varchar(20) | optional, choices | |
+| `occupation` | varchar(120) | optional | |
+| `registered_by` | varchar(20) | required | `SELF` or `RECEPTIONIST` |
+| `created_at` / `updated_at` | timestamptz | auto | |
 
-**Indexing:** attach a **GIN index** to `allergies` so the safety engine searches the
-array quickly:
-```python
-class Meta:
-    indexes = [GinIndex(fields=["allergies"])]
-```
-
-**`hospital_identifier` generation:** `HOSP-` + current year + `-` + zero-padded
-sequence (e.g. `HOSP-2026-00142`). Generate inside the model `save()` or a service
-function; keep it unique.
+- `hospital_identifier`: `HOSP-` + year + `-` + zero-padded sequence.
+- **Allergies are free text** in v2 (fixed vocabulary removed). Shown to the doctor as a
+  prominent red banner. There is **no** blocking pharmacy interceptor.
+- Height/weight live on `Vitals` (per visit), not here.
 
 ---
 
-## 5. `core_laborder` (model `LabOrder`)
+## 5. `core_encounter` (model `Encounter`)
 
-The doctor's request. This is the "pending order" the lab tech sees in their queue.
+The backbone: one OPD visit.
 
 | Column | Type | Constraints | Notes |
 | :-- | :-- | :-- | :-- |
 | `id` | UUID | PK | |
-| `patient_id` | UUID | FK → `core_patient.id`, required | |
-| `ordered_by_id` | UUID | FK → `core_staff.id`, required | the doctor |
-| `test_name` | varchar(50) | required, choices | `HEMOGLOBIN` / `WBC` / `PLATELETS` |
-| `loinc_code` | varchar(20) | required | auto-set from test (see §6) |
+| `patient` | FK → `core_patient` | required | |
+| `department` | varchar(30) | required, choices | one of the 7 departments |
+| `attending_doctor` | FK → `core_staff` | null | the doctor (role DOCTOR, matching department) |
+| `created_by` | FK → `core_staff` | required | the receptionist who checked the patient in |
+| `visit_type` | varchar(10) | default `NEW` | `NEW` / `FOLLOWUP` |
+| `chief_complaint` | varchar(500) | optional | reason for visit |
+| `status` | varchar(20) | default `REGISTERED` | `REGISTERED`→`VITALS_DONE`→`WITH_DOCTOR`→`LAB_PENDING`→`LAB_DONE`→`CLOSED` |
+| `visit_date` | date | auto (today) | |
+| `created_at` / `updated_at` | timestamptz | auto | |
+
+- Only staff create encounters (patients cannot self-inject into a queue).
+- Each role's queue filters by `status` + (for doctors) `department`.
+
+---
+
+## 6. `core_vitals` (model `Vitals`)
+
+Recorded by a **nurse** for an encounter (one-to-one).
+
+| Column | Type | Constraints | Notes |
+| :-- | :-- | :-- | :-- |
+| `id` | UUID | PK | |
+| `encounter` | OneToOne → `core_encounter` | required | |
+| `recorded_by` | FK → `core_staff` | required | the nurse |
+| `height_cm` | decimal(5,1) | optional | 30–250 |
+| `weight_kg` | decimal(5,1) | optional | 1–400 |
+| `bmi` | decimal(4,1) | computed | server-side from height/weight; never client-set |
+| `systolic_bp` | int | optional | 50–300 |
+| `diastolic_bp` | int | optional | 30–200 (< systolic) |
+| `pulse` | int | optional | 20–250 |
+| `temperature_c` | decimal(3,1) | optional | 30–45 |
+| `spo2` | int | optional | 50–100 |
+| `created_at` / `updated_at` | timestamptz | auto | |
+
+---
+
+## 7. `core_laborder` (model `LabOrder`)
+
+A doctor's request for a catalog test.
+
+| Column | Type | Constraints | Notes |
+| :-- | :-- | :-- | :-- |
+| `id` | UUID | PK | |
+| `encounter` | FK → `core_encounter` | required | |
+| `patient` | FK → `core_patient` | required | denormalised for easy filtering |
+| `ordered_by` | FK → `core_staff` | required | the doctor |
+| `test_code` | varchar(50) | required | a `LabTestCatalog` key |
+| `test_name` | varchar(120) | auto | from catalog |
+| `category` | varchar(20) | auto | from catalog |
+| `loinc_code` | varchar(20) | auto | from catalog (quantitative) |
 | `status` | varchar(20) | default `PENDING` | `PENDING` → `COMPLETED` |
-| `priority` | varchar(10) | default `ROUTINE` | `ROUTINE` / `URGENT` (drives queue sort) |
-| `created_at` | timestamptz | auto | |
-| `updated_at` | timestamptz | auto | |
+| `priority` | varchar(10) | default `ROUTINE` | `ROUTINE` / `URGENT` |
+| `created_at` / `updated_at` | timestamptz | auto | |
 
 ---
 
-## 6. `core_labobservation` (model `LabObservation`)
+## 8. `core_labreport` (model `LabReport`)
 
-The completed result. Feeds the FHIR `Observation` resource.
+A lab tech's submission for an order (holds the optional PDF + status).
 
 | Column | Type | Constraints | Notes |
 | :-- | :-- | :-- | :-- |
 | `id` | UUID | PK | |
-| `patient_id` | UUID | FK → `core_patient.id`, required | |
-| `lab_order_id` | UUID | FK → `core_laborder.id`, optional | links back to the request |
-| `entered_by_id` | UUID | FK → `core_staff.id`, required | the lab tech |
-| `test_name` | varchar(50) | required, choices | `HEMOGLOBIN` / `WBC` / `PLATELETS` |
-| `loinc_code` | varchar(20) | required | see reference table below |
-| `result_value` | decimal(7,2) | required, numeric only | validated against valid range |
-| `result_unit` | varchar(20) | required | see reference table below |
-| `created_at` | timestamptz | auto | becomes FHIR `effectiveDateTime` |
-| `updated_at` | timestamptz | auto | |
-
-**Lab Test Reference (hardcode this as constants):**
-
-| Test (`test_name`) | LOINC (`loinc_code`) | Valid range | Unit (`result_unit`) |
-| :-- | :-: | :-: | :-- |
-| `HEMOGLOBIN` | `718-7` | 0.00 – 25.00 | `g/dL` |
-| `WBC` | `6690-2` | 0.00 – 50.00 | `10^3/uL` |
-| `PLATELETS` | `777-3` | 0.00 – 1000.00 | `10^3/uL` |
-
-**Validation rule:** reject non-numeric input and any value outside the valid range
-with `HTTP 400`.
+| `lab_order` | FK → `core_laborder` | required | |
+| `patient` | FK → `core_patient` | required | denormalised |
+| `entered_by` | FK → `core_staff` | required | the lab tech |
+| `pdf_file` | file | optional | original report (future PDF pipeline) |
+| `source` | varchar(20) | default `MANUAL` | `MANUAL` / `PDF_EXTRACTED` (ready for future) |
+| `status` | varchar(20) | default `CONFIRMED` | `UPLOADED`→`EXTRACTED`→`CONFIRMED` (manual entry = CONFIRMED) |
+| `created_at` / `updated_at` | timestamptz | auto | |
 
 ---
 
-## 7. `core_prescription` (model `Prescription`)
+## 9. `core_labresult` (model `LabResult`)
+
+One test result. Feeds FHIR `Observation`.
 
 | Column | Type | Constraints | Notes |
 | :-- | :-- | :-- | :-- |
 | `id` | UUID | PK | |
-| `patient_id` | UUID | FK → `core_patient.id`, required | |
-| `prescribed_by_id` | UUID | FK → `core_staff.id`, required | the doctor |
-| `fulfilled_by_id` | UUID | FK → `core_staff.id`, optional | the pharmacist |
-| `medication_name` | varchar(200) | required | free text (the drug ordered) |
-| `dosage_instruction` | varchar(500) | required | e.g. "1 tablet every 8h for 7 days" |
+| `lab_report` | FK → `core_labreport` | required | |
+| `patient` | FK → `core_patient` | required | denormalised, for trend queries |
+| `test_code` | varchar(50) | required | catalog key |
+| `test_name` | varchar(120) | auto | |
+| `category` | varchar(20) | auto | |
+| `result_type` | varchar(20) | required | `QUANTITATIVE` / `REPORT` |
+| `loinc_code` | varchar(20) | quantitative | |
+| `result_value` | decimal(10,2) | quantitative | numeric, validated |
+| `result_unit` | varchar(20) | quantitative | from catalog |
+| `reference_low` / `reference_high` | decimal | quantitative | from catalog |
+| `flag` | varchar(10) | quantitative | auto `LOW`/`NORMAL`/`HIGH` |
+| `report_text` | varchar(1000) | report | narrative conclusion (culture, blood group, +/-) |
+| `created_at` / `updated_at` | timestamptz | auto | `created_at` → FHIR `effectiveDateTime` |
+
+- **Quantitative:** numeric value + auto flag vs reference range; chartable trend.
+- **Report:** `report_text` only (Microbiology culture, Blood Bank grouping, serology +/-).
+
+---
+
+## 10. `core_prescription` (model `Prescription`)
+
+| Column | Type | Constraints | Notes |
+| :-- | :-- | :-- | :-- |
+| `id` | UUID | PK | |
+| `encounter` | FK → `core_encounter` | required | |
+| `patient` | FK → `core_patient` | required | |
+| `prescribed_by` | FK → `core_staff` | required | doctor |
+| `fulfilled_by` | FK → `core_staff` | null | pharmacist |
+| `medication_name` | varchar(200) | required | free text |
+| `dosage_instruction` | varchar(500) | required | |
 | `status` | varchar(20) | default `ACTIVE` | `ACTIVE` → `COMPLETED` |
-| `fulfilled_at` | timestamptz | optional | set when pharmacist dispenses |
-| `created_at` | timestamptz | auto | |
-| `updated_at` | timestamptz | auto | |
+| `fulfilled_at` | timestamptz | null | |
+| `created_at` / `updated_at` | timestamptz | auto | |
+
+> **v2 change:** the blocking drug-allergy interceptor is **removed**. Allergies are shown
+> to the doctor as a red banner (informational). Rationale: real EHRs warn, they do not
+> silently block; and free-text allergies can't be reliably substring-matched.
 
 ---
 
-## 8. The Allergy Vocabulary (fixed list)
+## 11. `core_diagnosis` (model `Diagnosis`)
 
-Free-text allergies are **prohibited** (prevents typos that would defeat the safety
-engine). The `allergies` JSONB array may only contain these exact strings:
-
-```
-Penicillin | Sulfa Drugs | Aspirin | NSAIDs | Anticonvulsants | None
-```
-
-- `None` is the default safe state and means "no known allergies."
-- Store as an array, e.g. `["Penicillin", "NSAIDs"]`.
-
----
-
-## 9. The Clinical Safety Interceptor (how it reads the data)
-
-When a doctor submits a `Prescription`, inside a single `@transaction.atomic` block:
-
-1. Fetch `core_patient.allergies` for the target patient.
-2. Compare `medication_name` against each allergen using a **case-insensitive substring
-   match** (e.g. `"Penicillin G"` matched against `"Penicillin"` → **BLOCK**).
-3. If any allergen matches → **roll back**, save nothing, return `HTTP 400` with the
-   safety-alert payload (see API_SPECIFICATION.md §2.3).
-4. If no match → commit the prescription and push it to the pharmacist queue.
-
-> **Honest limitation (write this in your report):** substring matching is simple and
-> can produce false positives (a drug name that merely contains an allergen word) or
-> miss brand-name synonyms. A production system would use a coded drug database
-> (RxNorm) and a curated cross-reactivity table. For this project, the fixed allergen
-> vocabulary keeps the match reliable enough to demonstrate the concept.
+| Column | Type | Constraints | Notes |
+| :-- | :-- | :-- | :-- |
+| `id` | UUID | PK | |
+| `encounter` | FK → `core_encounter` | required | |
+| `patient` | FK → `core_patient` | required | |
+| `diagnosed_by` | FK → `core_staff` | required | doctor |
+| `icd10_code` | varchar(10) | required, choices | from the ~39-entry ICD-10 list |
+| `disease_name` | varchar(255) | auto | from ICD-10 table |
+| `clinical_status` | varchar(20) | default `ACTIVE` | `ACTIVE` / `RESOLVED` |
+| `onset_date` | date | null | |
+| `notes` | varchar(1000) | optional | |
+| `resolved_at` | timestamptz | null | |
+| `created_at` / `updated_at` | timestamptz | auto | |
 
 ---
 
-## 10. Column → API → FHIR Traceability
+## 12. `core_accessrequest` (model `AccessRequest`)
 
-This table proves the docs are consistent. Any change here must be reflected in
-`API_SPECIFICATION.md` and `FHIR_MAPPING.md`.
+Cross-hospital FHIR record sharing (patient approves in real time — no consent code).
+
+| Column | Type | Constraints | Notes |
+| :-- | :-- | :-- | :-- |
+| `id` | UUID | PK | request_id returned to the external hospital |
+| `patient` | FK → `core_patient` | null until matched | matched by `national_id` |
+| `national_id` | varchar(20) | required | the NID the external hospital requested |
+| `requester_label` | varchar(120) | optional | free label e.g. "Hospital B" |
+| `status` | varchar(20) | default `PENDING` | `PENDING`→`APPROVED`/`DENIED`/`EXPIRED` |
+| `expires_at` | timestamptz | required | ~2 min window; then EXPIRED |
+| `approved_at` | timestamptz | null | |
+| `created_at` / `updated_at` | timestamptz | auto | |
+
+**Flow:** external hospital `POST`s a request by NID → patient sees it in the portal and
+Approves/Denies → external hospital polls the request id → on APPROVED, receives the FHIR
+Bundle. On PENDING → 202; DENIED/EXPIRED → 403.
+
+---
+
+## 13. Lab Test Catalog
+
+The orderable tests live in `LabTestCatalog` (see `core/constants.py`), each tagged with
+category, department(s), result type, LOINC, unit, and adult reference range. Categories:
+Biochemistry, Hematology, Urinalysis, Microbiology, Serology/Immunology, Coagulation,
+Blood Bank.
+
+> **Honest limitation (report):** reference ranges are simple adult ranges (one per test).
+> Age/sex-specific ranges are future work. Verify ranges against a real Nepali lab report.
+
+---
+
+## 14. Column → API → FHIR Traceability (patient + lab result)
 
 | DB column | Flat API field | FHIR path |
 | :-- | :-- | :-- |
 | `patient.first_name` | `first_name` | `Patient.name[0].given[0]` |
 | `patient.last_name` | `last_name` | `Patient.name[0].family` |
+| `patient.national_id` | `national_id` | `Patient.identifier` (system `http://mohp.gov.np/nid`) |
 | `patient.phone_number` | `phone_number` | `Patient.telecom[0].value` |
 | `patient.gender` | `gender` | `Patient.gender` |
 | `patient.date_of_birth` | `date_of_birth` | `Patient.birthDate` |
-| `patient.hospital_identifier` | `hospital_identifier` | `Patient.identifier[0].value` |
-| `labobservation.loinc_code` | `loinc_code` | `Observation.code.coding[0].code` |
-| `labobservation.result_value` | `result_value` | `Observation.valueQuantity.value` |
-| `labobservation.result_unit` | `result_unit` | `Observation.valueQuantity.unit` |
-| `labobservation.created_at` | `created_at` | `Observation.effectiveDateTime` |
+| `encounter.department` | `department` | `Encounter.serviceType` |
+| `labresult.loinc_code` | `loinc_code` | `Observation.code.coding[0].code` |
+| `labresult.result_value` | `result_value` | `Observation.valueQuantity.value` |
+| `labresult.result_unit` | `result_unit` | `Observation.valueQuantity.unit` |
+| `labresult.created_at` | `created_at` | `Observation.effectiveDateTime` |
+| `diagnosis.icd10_code` | `icd10_code` | `Condition.code.coding[0].code` |
