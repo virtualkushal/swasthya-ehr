@@ -1,38 +1,44 @@
-
 import { Routes, Route } from "react-router-dom";
 import ProtectedRoute from "./components/ProtectedRoute";
+import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
-import HomePage from "./pages/HomePage";
+import StaffRegisterPage from "./pages/StaffRegisterPage";
+import ChangePasswordPage from "./pages/ChangePasswordPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 import AdminDashboard from "./pages/AdminDashboard";
 import ReceptionDashboard from "./pages/ReceptionDashboard";
+import NurseDashboard from "./pages/NurseDashboard";
 import DoctorDashboard from "./pages/DoctorDashboard";
 import PharmacyDashboard from "./pages/PharmacyDashboard";
 import LabDashboard from "./pages/LabDashboard";
 import PatientPortal from "./pages/PatientPortal";
-import ForgotPasswordPage from "./pages/ForgotPasswordPage";
-import ResetPasswordPage from "./pages/ResetPasswordPage";
-
-
+import HospitalBViewer from "./pages/HospitalBViewer";
 
 // App routing.
-// Public: /login and /register (patient self-registration).
-// Protected + role-gated: each staff role has its own dashboard.
+// Public: landing, login, patient register, staff register, password flows,
+// and the standalone Hospital B viewer (interoperability demo).
+// Protected + role-gated: one dashboard per role.
 export default function App() {
   return (
     <Routes>
+      <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/staff-register" element={<StaffRegisterPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password/:uid/:token/" element={<ResetPasswordPage />} />
+      <Route path="/hospital-b" element={<HospitalBViewer />} />
 
       <Route
-        path="/"
+        path="/change-password"
         element={
           <ProtectedRoute>
-            <HomePage />
+            <ChangePasswordPage />
           </ProtectedRoute>
         }
       />
-
       <Route
         path="/admin"
         element={
@@ -41,7 +47,6 @@ export default function App() {
           </ProtectedRoute>
         }
       />
-
       <Route
         path="/reception"
         element={
@@ -50,7 +55,14 @@ export default function App() {
           </ProtectedRoute>
         }
       />
-
+      <Route
+        path="/nurse"
+        element={
+          <ProtectedRoute roles={["NURSE"]}>
+            <NurseDashboard />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/doctor"
         element={
@@ -59,7 +71,6 @@ export default function App() {
           </ProtectedRoute>
         }
       />
-
       <Route
         path="/pharmacy"
         element={
@@ -68,7 +79,6 @@ export default function App() {
           </ProtectedRoute>
         }
       />
-
       <Route
         path="/lab"
         element={
@@ -77,7 +87,6 @@ export default function App() {
           </ProtectedRoute>
         }
       />
-
       <Route
         path="/portal"
         element={
@@ -86,17 +95,6 @@ export default function App() {
           </ProtectedRoute>
         }
       />
-
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
-      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-      <Route path="/reset-password/:uid/:token/" element={<ResetPasswordPage />} />
-
-      {/* Protected routes */}
-      <Route path="/" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
-      {/* ... rest of your routes */}
     </Routes>
-
-
   );
 }

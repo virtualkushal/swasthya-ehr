@@ -1,255 +1,131 @@
 import { useEffect, useState } from "react";
-import {
-  User,
-  ShieldAlert,
-  FlaskConical,
-  Pill,
-  Loader2,
-  Stethoscope,
-} from "lucide-react";
-
-import { useAuth } from "../context/AuthContext";
+import { Loader2, Share2, Check, X, HeartPulse, FileText, Pill, Stethoscope } from "lucide-react";
 import api from "../services/api";
+import { useAuth } from "../context/AuthContext";
 import DashboardHeader from "../components/DashboardHeader";
 import TrendChart from "../components/TrendChart";
-import { LAB_TESTS } from "../constants";
 
-// Read-only patient portal (REQ personas 2.1 / 2.5). A signed-in patient sees
-// ONLY their own profile, lab results, and medications. All scoping happens on
-// the backend at /api/v1/portal/me/ (filtered by the linked user account), so
-// the client never asks for anyone else's rows.
+// Read-only patient portal: your profile, clinical history, lab trends, and any
+// cross-hospital access requests you can approve or deny.
 export default function PatientPortal() {
   const { user, logout } = useAuth();
   const [data, setData] = useState(null);
+  const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
 
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const res = await api.get("/v1/portal/me/");
-        if (active) setData(res.data);
-      } catch (err) {
-        if (active) {
-          setError(
-            err?.response?.data?.detail ||
-              "Could not load your records. Please try again later."
-          );
-        }
-      } finally {
-        if (active) setLoading(false);
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const labelFor = (code) =>
-    LAB_TESTS.find((t) => t.value === code)?.label || code;
-
-  const fmtDateTime = (iso) => {
+  async function load() {
+    setLoading(true);
     try {
-      return new Date(iso).toLocaleString(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-    } catch {
-      return "";
+      const [me, reqs] = await Promise.all([
+        api.get("/v1/portal/me/"),
+        api.get("/v1/portal/share-requests/"),
+      ]);
+      setData(me.data);
+      setRequests(reqs.data.results || []);
+    } finally {
+      setLoading(false);
     }
-  };
+  }
+  useEffect(() => { load(); }, []);
+
+  async function decide(id, decision) {
+    await api.post(`/v1/portal/share-requests/${id}/decision/`, { decision });
+    load();
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-teal-50">
+        <DashboardHeader user={user} logout={logout} />
+        <div className="flex justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-teal-500" /></div>
+      </div>
+    );
+  }
+
+  const p = data?.patient;
+  const pending = requests.filter((r) => r.status === "PENDING");
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <DashboardHeader user={user} logout={logout} subtitle="Patient portal" />
-
-      <main className="max-w-4xl mx-auto px-6 py-8 space-y-8">
-        {loading ? (
-          <div className="flex items-center justify-center py-20 text-slate-500">
-            <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading your
-            records…
+    <div className="min-h-screen bg-gradient-to-b from-teal-50 to-white">
+      <DashboardHeader user={user} logout={logout} />
+      <main className="mx-auto max-w-4xl space-y-4 px-6 py-6">
+        {p && (
+          <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100">
+            <h2 className="text-xl font-bold text-slate-900">{p.first_name} {p.last_name}</h2>
+            <p className="text-sm text-slate-500">
+              {p.hospital_identifier} · NID {p.national_id} · {p.gender} · {p.age} yrs · {p.blood_group}
+            </p>
+            {p.allergies?.length > 0 && (
+              <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+                Allergies: {p.allergies.join(", ")}
+              </div>
+            )}
           </div>
-        ) : error ? (
-          <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 px-4 py-3">
-            {error}
-          </div>
-        ) : (
-          <>
-            {/* Profile card */}
-            <section className="bg-white rounded-2xl border border-slate-200 p-6">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="p-2 bg-teal-100 rounded-lg">
-                  <User className="w-5 h-5 text-teal-700" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-semibold text-slate-800">
-                    {data.patient.first_name} {data.patient.last_name}
-                  </h2>
-                  <p className="text-sm text-slate-500 font-mono">
-                    {data.patient.hospital_identifier}
-                  </p>
-                </div>
-              </div>
-              <dl className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
-                <div>
-                  <dt className="text-slate-400">Phone</dt>
-                  <dd className="text-slate-700">{data.patient.phone_number}</dd>
-                </div>
-                <div>
-                  <dt className="text-slate-400">Date of birth</dt>
-                  <dd className="text-slate-700">
-                    {data.patient.date_of_birth}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-slate-400">Gender</dt>
-                  <dd className="text-slate-700 capitalize">
-                    {data.patient.gender}
-                  </dd>
-                </div>
-              </dl>
-
-              <div className="mt-4 flex items-start gap-2">
-                <ShieldAlert className="w-4 h-4 text-amber-500 mt-0.5" />
-                <div className="text-sm">
-                  <span className="text-slate-400">Known allergies: </span>
-                  {data.patient.allergies?.length ? (
-                    <span className="text-slate-700">
-                      {data.patient.allergies.join(", ")}
-                    </span>
-                  ) : (
-                    <span className="text-slate-500">None recorded</span>
-                  )}
-                </div>
-              </div>
-            </section>
-
-            {/* Lab trends */}
-            <section>
-              <div className="flex items-center gap-2 mb-3">
-                <FlaskConical className="w-5 h-5 text-slate-500" />
-                <h3 className="font-semibold text-slate-800">
-                  My lab results
-                </h3>
-              </div>
-              {data.trends.length ? (
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {data.trends.map((t) => (
-                    <TrendChart
-                      key={t.test_name}
-                      points={t.points}
-                      unit={t.unit}
-                      label={labelFor(t.test_name)}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-slate-500 bg-white rounded-lg border border-slate-200 p-4">
-                  No lab results have been recorded yet.
-                </p>
-              )}
-            </section>
-
-            {/* Medications */}
-            <section>
-              <div className="flex items-center gap-2 mb-3">
-                <Pill className="w-5 h-5 text-slate-500" />
-                <h3 className="font-semibold text-slate-800">My medications</h3>
-              </div>
-              {data.prescriptions.length ? (
-                <ul className="space-y-2">
-                  {data.prescriptions.map((p) => (
-                    <li
-                      key={p.id}
-                      className="bg-white rounded-lg border border-slate-200 p-4 flex items-start justify-between gap-4"
-                    >
-                      <div>
-                        <p className="font-medium text-slate-800">
-                          {p.medication_name}
-                        </p>
-                        <p className="text-sm text-slate-500">
-                          {p.dosage_instruction}
-                        </p>
-                        <p className="text-xs text-slate-400 mt-1">
-                          Prescribed {fmtDateTime(p.created_at)}
-                          {p.prescribed_by_name
-                            ? ` · by ${p.prescribed_by_name}`
-                            : ""}
-                        </p>
-                      </div>
-                      <span
-                        className={`text-xs font-medium px-2 py-1 rounded-full whitespace-nowrap ${
-                          p.status === "ACTIVE"
-                            ? "bg-teal-50 text-teal-700"
-                            : "bg-slate-100 text-slate-500"
-                        }`}
-                      >
-                        {p.status === "ACTIVE" ? "Active" : "Dispensed"}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-slate-500 bg-white rounded-lg border border-slate-200 p-4">
-                  You have no medications on record.
-                </p>
-              )}
-            </section>
-
-            {/* Diagnoses */}
-            <section>
-              <div className="flex items-center gap-2 mb-3">
-                <Stethoscope className="w-5 h-5 text-slate-500" />
-                <h3 className="font-semibold text-slate-800">My diagnoses</h3>
-              </div>
-              {data.diagnoses?.length ? (
-                <ul className="space-y-2">
-                  {data.diagnoses.map((d) => (
-                    <li
-                      key={d.id}
-                      className="bg-white rounded-lg border border-slate-200 p-4 flex items-start justify-between gap-4"
-                    >
-                      <div>
-                        <p className="font-medium text-slate-800">
-                          <span className="font-mono text-xs text-slate-500 mr-2">
-                            {d.icd10_code}
-                          </span>
-                          {d.disease_name}
-                        </p>
-                        <p className="text-xs text-slate-400 mt-1">
-                          Recorded {fmtDateTime(d.created_at)}
-                          {d.diagnosed_by_name
-                            ? ` · by ${d.diagnosed_by_name}`
-                            : ""}
-                          {d.onset_date ? ` · onset ${d.onset_date}` : ""}
-                        </p>
-                      </div>
-                      <span
-                        className={`text-xs font-medium px-2 py-1 rounded-full whitespace-nowrap ${
-                          d.clinical_status === "ACTIVE"
-                            ? "bg-rose-50 text-rose-700"
-                            : "bg-slate-100 text-slate-500"
-                        }`}
-                      >
-                        {d.clinical_status === "ACTIVE" ? "Active" : "Resolved"}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-slate-500 bg-white rounded-lg border border-slate-200 p-4">
-                  You have no diagnoses on record.
-                </p>
-              )}
-            </section>
-          </>
-
         )}
+
+        {pending.length > 0 && (
+          <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-amber-200">
+            <h3 className="flex items-center gap-2 font-semibold text-slate-800">
+              <Share2 className="h-5 w-5 text-amber-500" /> Record access requests
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">Another hospital is requesting access to your records.</p>
+            <ul className="mt-3 space-y-2">
+              {pending.map((r) => (
+                <li key={r.id} className="flex items-center justify-between rounded-lg bg-amber-50 px-4 py-3">
+                  <span className="text-sm font-medium text-slate-800">{r.requester_label || "External hospital"}</span>
+                  <div className="flex gap-2">
+                    <button onClick={() => decide(r.id, "APPROVE")}
+                      className="flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700">
+                      <Check className="h-4 w-4" /> Approve
+                    </button>
+                    <button onClick={() => decide(r.id, "DENY")}
+                      className="flex items-center gap-1 rounded-lg bg-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-300">
+                      <X className="h-4 w-4" /> Deny
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {data?.trends?.length > 0 && (
+          <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100">
+            <h3 className="mb-3 flex items-center gap-2 font-semibold text-slate-800">
+              <HeartPulse className="h-5 w-5 text-teal-500" /> Lab trends
+            </h3>
+            <div className="grid gap-4 md:grid-cols-2">
+              {data.trends.map((t) => (
+                <TrendChart key={t.test_code} points={t.points} unit={t.unit} label={t.test_name} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        <Section icon={Stethoscope} title="Diagnoses" items={data?.diagnoses}
+          render={(d) => <>{d.disease_name} <span className="text-xs text-slate-400">({d.icd10_code}) · {d.clinical_status}</span></>} />
+        <Section icon={FileText} title="Lab results" items={data?.lab_results}
+          render={(r) => <>{r.test_name}: <b>{r.result_value ?? r.report_text}</b> {r.result_unit} {r.flag && r.flag !== "NORMAL" && <span className="text-red-600">({r.flag})</span>}</>} />
+        <Section icon={Pill} title="Medications" items={data?.prescriptions}
+          render={(p2) => <>{p2.medication_name} <span className="text-xs text-slate-400">· {p2.dosage_instruction} · {p2.status}</span></>} />
       </main>
+    </div>
+  );
+}
+
+function Section({ icon: Icon, title, items, render }) {
+  return (
+    <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100">
+      <h3 className="flex items-center gap-2 font-semibold text-slate-800">
+        <Icon className="h-5 w-5 text-teal-500" /> {title}
+      </h3>
+      {!items || items.length === 0 ? (
+        <p className="mt-2 text-sm text-slate-400">None on record.</p>
+      ) : (
+        <ul className="mt-2 space-y-1.5 text-sm text-slate-700">
+          {items.map((it) => <li key={it.id} className="border-b border-slate-50 pb-1.5">{render(it)}</li>)}
+        </ul>
+      )}
     </div>
   );
 }
