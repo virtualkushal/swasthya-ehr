@@ -121,7 +121,41 @@ class ModelTests(APITestCase):
         self.assertEqual(normal.flag, "NORMAL")
 
 
+class LabReportApiTests(APITestCase):
+    """Regression: a lab tech can submit a report via the API (order closes)."""
+
+    def test_lab_tech_submits_report_and_order_completes(self):
+        doctor = make_staff("labdoc@x.np", Role.DOCTOR, Department.HEMATOLOGY)
+        labtech = make_staff("labtech2@x.np", Role.LAB_TECH)
+        recep = make_staff("labrec@x.np", Role.RECEPTIONIST)
+        p = make_patient(nid="9876543210")
+        enc = Encounter.objects.create(
+            patient=p, department=Department.HEMATOLOGY, created_by=recep
+        )
+        order = LabOrder.objects.create(
+            encounter=enc, patient=p, ordered_by=doctor, test_code="HEMOGLOBIN"
+        )
+
+        self.client.force_authenticate(user=labtech)
+        # The client only sends test_code + result_value; the server fills in
+        # lab_report and patient. This used to 400 with "This field is required".
+        resp = self.client.post(
+            "/api/v1/lab-reports/",
+            {
+                "lab_order": str(order.id),
+                "results": [{"test_code": "HEMOGLOBIN", "result_value": "13.50"}],
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.content)
+        order.refresh_from_db()
+        self.assertEqual(order.status, "COMPLETED")
+        self.assertEqual(len(resp.data["results"]), 1)
+        self.assertEqual(resp.data["results"][0]["flag"], "NORMAL")
+
+
 class AuthTests(APITestCase):
+
     def test_login_by_email_returns_role(self):
         make_staff("doc@x.np", Role.DOCTOR, Department.CARDIOLOGY)
         resp = self.client.post(

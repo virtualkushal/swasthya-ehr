@@ -498,6 +498,8 @@ class LabResultSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id",
+            "lab_report",
+            "patient",
             "test_name",
             "category",
             "result_type",
@@ -516,6 +518,7 @@ class LabResultSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         meta = LabTestCatalog.get(attrs.get("test_code"))
+
         if not meta:
             return attrs
         if meta["type"] == LabResultType.QUANTITATIVE:
