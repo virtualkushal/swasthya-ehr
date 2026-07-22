@@ -42,35 +42,35 @@ export default function PharmacyDashboard() {
   }, {});
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-surface-800">
       <DashboardHeader user={user} logout={logout} subtitle="Dispensing window" />
 
       <main className="max-w-3xl mx-auto p-6">
         {flash && (
-          <div className="mb-4 flex items-center gap-2 rounded-lg bg-teal-50 border border-teal-200 text-teal-800 px-4 py-3">
+          <div className="mb-4 flex items-center gap-2 rounded-lg bg-brand-500/10 border border-brand-500/30 text-teal-800 px-4 py-3">
             <CheckCircle2 className="w-5 h-5" />
             {flash}
           </div>
         )}
 
         <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semibold text-slate-800 flex items-center gap-2">
-            <Pill className="w-5 h-5 text-teal-700" /> Active queue
+          <h2 className="font-semibold text-white flex items-center gap-2">
+            <Pill className="w-5 h-5 text-brand-300" /> Active queue
           </h2>
           <button
             onClick={load}
-            className="text-sm text-teal-700 hover:underline"
+            className="text-sm text-brand-300 hover:underline"
           >
             Refresh
           </button>
         </div>
 
         {loading ? (
-          <div className="flex items-center gap-2 text-slate-500 py-12 justify-center">
+          <div className="flex items-center gap-2 text-gray-400 py-12 justify-center">
             <Loader2 className="w-5 h-5 animate-spin" /> Loading queue…
           </div>
         ) : queue.length === 0 ? (
-          <div className="text-center text-slate-400 py-16 bg-white rounded-2xl border border-slate-200">
+          <div className="text-center text-gray-500 py-16 bg-surface-750 rounded-2xl border border-line">
             <PackageCheck className="w-10 h-10 mx-auto mb-2" />
             <p>The queue is empty. All prescriptions have been dispensed.</p>
           </div>
@@ -79,30 +79,30 @@ export default function PharmacyDashboard() {
             {Object.entries(groups).map(([patientName, items]) => (
               <div
                 key={patientName}
-                className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden"
+                className="bg-surface-750 rounded-2xl shadow-sm border border-line overflow-hidden"
               >
-                <div className="px-5 py-3 bg-slate-50 border-b border-slate-100">
-                  <p className="font-medium text-slate-800">{patientName}</p>
+                <div className="px-5 py-3 bg-surface-700 border-b border-line">
+                  <p className="font-medium text-white">{patientName}</p>
                 </div>
-                <ul className="divide-y divide-slate-100">
+                <ul className="divide-y divide-line">
                   {items.map((rx) => (
                     <li
                       key={rx.id}
                       className="px-5 py-3 flex items-center justify-between gap-4"
                     >
                       <div>
-                        <p className="text-slate-800">{rx.medication_name}</p>
-                        <p className="text-sm text-slate-500">
+                        <p className="text-white">{rx.medication_name}</p>
+                        <p className="text-sm text-gray-400">
                           {rx.dosage_instruction}
                         </p>
-                        <p className="text-xs text-slate-400 mt-0.5">
+                        <p className="text-xs text-gray-500 mt-0.5">
                           Prescribed by {rx.prescribed_by_name}
                         </p>
                       </div>
                       <button
                         onClick={() => fulfill(rx)}
                         disabled={fulfilling === rx.id}
-                        className="flex items-center gap-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white text-sm font-medium rounded-lg px-3 py-2 whitespace-nowrap"
+                        className="flex items-center gap-2 bg-brand-600 hover:bg-brand-500 disabled:opacity-60 text-white text-sm font-medium rounded-lg px-3 py-2 whitespace-nowrap"
                       >
                         {fulfilling === rx.id ? (
                           <Loader2 className="w-4 h-4 animate-spin" />

@@ -68,8 +68,8 @@ export default function PatientForm({
   }
 
   const field =
-    "w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500";
-  const lbl = "block text-sm font-medium text-slate-700 mb-1";
+    "w-full rounded-lg border border-line bg-surface-800 text-white placeholder-gray-500 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500";
+  const lbl = "block text-sm font-medium text-gray-200 mb-1";
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -160,7 +160,7 @@ export default function PatientForm({
         {allergies.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-2">
             {allergies.map((a) => (
-              <span key={a} className="inline-flex items-center gap-1 rounded-full bg-red-50 px-3 py-1 text-sm text-red-700 ring-1 ring-red-100">
+              <span key={a} className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-3 py-1 text-sm text-red-300 ring-1 ring-red-500/30">
                 {a}
                 <button type="button" onClick={() => setAllergies((cur) => cur.filter((x) => x !== a))}>
                   <X className="h-3.5 w-3.5" />
@@ -169,15 +169,15 @@ export default function PatientForm({
             ))}
           </div>
         )}
-        <p className="mt-1 text-xs text-slate-400">Leave empty if the patient has no known allergies.</p>
+        <p className="mt-1 text-xs text-gray-500">Leave empty if the patient has no known allergies.</p>
       </div>
 
       {withCredentials && (
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-2">
-          <p className="text-sm font-medium text-slate-700">
-            Create a portal login <span className="font-normal text-slate-400">(optional)</span>
+        <div className="rounded-lg border border-line bg-surface-700 p-4 space-y-2">
+          <p className="text-sm font-medium text-gray-200">
+            Create a portal login <span className="font-normal text-gray-500">(optional)</span>
           </p>
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-gray-500">
             Enter an email to sign in later and view your records. A temporary password will be emailed. Leave blank to skip.
           </p>
           <input type="email" className={field} value={form.email} onChange={(e) => update("email", e.target.value)} placeholder="you@example.com" autoComplete="email" />
@@ -185,7 +185,7 @@ export default function PatientForm({
       )}
 
       {error && (
-        <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2">
+        <div className="rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-sm px-3 py-2">
           {error}
         </div>
       )}
@@ -193,7 +193,7 @@ export default function PatientForm({
       <button
         type="submit"
         disabled={busy}
-        className="w-full flex items-center justify-center gap-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white font-medium rounded-lg px-4 py-2.5 transition-colors"
+        className="w-full flex items-center justify-center gap-2 bg-brand-600 hover:bg-brand-500 disabled:opacity-60 text-white font-medium rounded-lg px-4 py-2.5 transition-colors"
       >
         {busy && <Loader2 className="w-5 h-5 animate-spin" />}
         {busy ? "Saving…" : submitLabel}

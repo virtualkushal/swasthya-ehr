@@ -34,31 +34,22 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-teal-50 px-4">
+    <div className="auth-shell">
       <div className="w-full max-w-md">
         <div className="mb-6 flex flex-col items-center">
-          <Link to="/" className="rounded-2xl bg-gradient-to-br from-teal-500 to-blue-600 p-3 shadow-md">
+          <Link to="/" className="rounded-2xl bg-gradient-to-br from-brand-500 to-brand-800 p-3 shadow-lg shadow-brand-900/40">
             <HeartPulse className="h-7 w-7 text-white" />
           </Link>
-          <h1 className="mt-3 text-2xl font-bold text-slate-900">
-            Swasthya<span className="text-teal-600">EHR</span>
+          <h1 className="mt-3 font-display text-2xl font-bold text-white">
+            Swasthya<span className="text-brand-400">EHR</span>
           </h1>
-          <p className="text-sm text-slate-500">Sign in to your workspace</p>
+          <p className="text-sm text-gray-400">Sign in to your workspace</p>
         </div>
 
-        <form
-          onSubmit={handleSubmit}
-          className="space-y-4 rounded-2xl bg-white p-8 shadow-lg ring-1 ring-slate-100"
-        >
-          {error && (
-            <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 ring-1 ring-red-100">
-              {error}
-            </div>
-          )}
+        <form onSubmit={handleSubmit} className="glass-card space-y-4 rounded-2xl p-8">
+          {error && <div className="alert-error">{error}</div>}
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">
-              Email
-            </label>
+            <label className="label">Email</label>
             <input
               type="email"
               value={email}
@@ -66,43 +57,38 @@ export default function LoginPage() {
               required
               autoComplete="email"
               placeholder="you@example.com"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+              className="input"
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">
-              Password
-            </label>
+            <label className="label">Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
               autoComplete="current-password"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+              className="input"
             />
           </div>
-          <button
-            type="submit"
-            disabled={loading}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-teal-600 px-4 py-2.5 font-semibold text-white shadow-sm transition hover:bg-teal-700 disabled:opacity-60"
-          >
+          <button type="submit" disabled={loading} className="btn-primary w-full">
             {loading && <Loader2 className="h-4 w-4 animate-spin" />}
             Sign in
           </button>
           <div className="flex items-center justify-between text-sm">
-            <Link to="/forgot-password" className="text-teal-600 hover:underline">
+            <Link to="/forgot-password" className="link">
               Forgot password?
             </Link>
-            <Link to="/register" className="text-slate-500 hover:underline">
+            <Link to="/register" className="text-gray-400 hover:text-white">
               New patient? Register
             </Link>
           </div>
-          <p className="text-center text-xs text-slate-400">
-            Staff? <Link to="/staff-register" className="text-teal-600 hover:underline">Request a staff account</Link>
+          <p className="text-center text-xs text-gray-500">
+            Staff? <Link to="/staff-register" className="link">Request a staff account</Link>
           </p>
         </form>
       </div>
     </div>
   );
+
 }

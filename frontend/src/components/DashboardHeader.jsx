@@ -14,19 +14,19 @@ export default function DashboardHeader({ user, logout, subtitle }) {
     .toUpperCase();
 
   return (
-    <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/80 backdrop-blur">
+    <header className="sticky top-0 z-20 border-b border-line bg-surface-800/80 backdrop-blur-md">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
         <div className="flex items-center gap-3">
           <div
-            className={`rounded-xl bg-gradient-to-br ${theme.gradient} p-2 shadow-sm`}
+            className={`rounded-xl bg-gradient-to-br ${theme.gradient} p-2 shadow-lg shadow-brand-900/40`}
           >
             <HeartPulse className="h-5 w-5 text-white" />
           </div>
           <div>
-            <h1 className="font-bold tracking-tight text-slate-800">
-              Swasthya<span className="text-teal-600">EHR</span>
+            <h1 className="font-display font-bold tracking-tight text-white">
+              Swasthya<span className="text-brand-400">EHR</span>
             </h1>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-gray-400">
               {subtitle || theme.label}
             </p>
           </div>
@@ -44,13 +44,13 @@ export default function DashboardHeader({ user, logout, subtitle }) {
             >
               {initials}
             </div>
-            <span className="hidden text-sm text-slate-600 md:inline">
+            <span className="hidden text-sm text-gray-300 md:inline">
               {user?.full_name}
             </span>
           </div>
           <button
             onClick={logout}
-            className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
+            className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm text-gray-400 transition-colors hover:bg-surface-700 hover:text-white"
           >
             <LogOut className="h-4 w-4" />
             <span className="hidden sm:inline">Sign out</span>
@@ -58,5 +58,6 @@ export default function DashboardHeader({ user, logout, subtitle }) {
         </div>
       </div>
     </header>
+
   );
 }
