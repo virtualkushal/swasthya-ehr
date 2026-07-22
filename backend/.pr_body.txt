@@ -1,0 +1,13 @@
+Lab technicians could not submit results. Every submission returned HTTP 400:
+`{"results":[{"lab_report":["This field is required."],"patient":["This field is required."]}]}`
+
+## Cause
+`LabResultSerializer` marked `lab_report` and `patient` as required *inputs*, but `LabReportCreateView` fills those in server-side from the order. Validation failed before the view could set them.
+
+## Fix
+- Mark `lab_report` and `patient` as read-only on `LabResultSerializer`.
+- Add an API regression test that logs in as a lab tech, POSTs a report with only `test_code` + `result_value`, and asserts `201` + the order becomes `COMPLETED`.
+
+## Verification
+- Reproduced the 400 before the fix, confirmed 201 after.
+- `manage.py test core` -> 16 tests OK.

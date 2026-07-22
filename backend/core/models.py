@@ -476,10 +476,20 @@ class AccessRequest(TimeStampedUUIDModel):
     )
     national_id = models.CharField(max_length=20)
     requester_label = models.CharField(max_length=120, blank=True)
+    requester_hospital = models.CharField(max_length=20, blank=True)
+    # ["diagnoses","labs","medications"] or ["everything"]; empty == everything.
+    scope = models.JSONField(default=list, blank=True)
     status = models.CharField(
         max_length=20,
         choices=AccessRequestStatus.CHOICES,
         default=AccessRequestStatus.PENDING,
+    )
+    approved_by = models.ForeignKey(
+        Staff,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="approved_share_requests",
     )
     expires_at = models.DateTimeField()
     approved_at = models.DateTimeField(null=True, blank=True)
@@ -490,3 +500,56 @@ class AccessRequest(TimeStampedUUIDModel):
 
     def __str__(self):
         return f"AccessRequest {self.national_id} [{self.status}]"
+
+
+class OutboundShareRequest(TimeStampedUUIDModel):
+    """A request THIS hospital sent to a PEER hospital for a patient's records."""
+
+    requested_by = models.ForeignKey(
+        Staff, on_delete=models.PROTECT, related_name="outbound_share_requests"
+    )
+    peer_code = models.CharField(max_length=20)
+    peer_name = models.CharField(max_length=120, blank=True)
+    peer_base_url = models.CharField(max_length=255)
+    national_id = models.CharField(max_length=20)
+    scope = models.JSONField(default=list, blank=True)
+    # PENDING/APPROVED/DENIED/EXPIRED (mirrors peer) or ERROR if the call failed.
+    status = models.CharField(max_length=20, default="PENDING")
+    peer_request_id = models.CharField(max_length=64, blank=True)
+    bundle = models.JSONField(null=True, blank=True)
+    error = models.CharField(max_length=500, blank=True)
+    imported = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = "core_outbound_share_request"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"OutboundShare {self.national_id} -> {self.peer_code} [{self.status}]"
+
+
+class ExternalRecord(TimeStampedUUIDModel):
+    """A peer hospital's FHIR Bundle imported and saved into THIS hospital's DB."""
+
+    patient = models.ForeignKey(
+        Patient,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="external_records",
+    )
+    national_id = models.CharField(max_length=20)
+    source_hospital_code = models.CharField(max_length=20)
+    source_hospital_name = models.CharField(max_length=120, blank=True)
+    scope = models.JSONField(default=list, blank=True)
+    bundle = models.JSONField()
+    imported_by = models.ForeignKey(
+        Staff, on_delete=models.PROTECT, related_name="imported_records"
+    )
+
+    class Meta:
+        db_table = "core_external_record"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"ExternalRecord {self.national_id} from {self.source_hospital_code}"
