@@ -56,7 +56,7 @@ export default function TrendChart({ points = [], unit = "", label = "" }) {
   };
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-3">
+    <div className="rounded-lg border border-gray-200 bg-surface-750 p-3">
       <div className="mb-1 flex items-baseline justify-between">
         <h4 className="text-sm font-semibold text-gray-700">{label}</h4>
         <span className="text-sm text-gray-500">

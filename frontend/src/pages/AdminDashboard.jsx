@@ -80,7 +80,7 @@ export default function AdminDashboard() {
         <div className="flex gap-2">
           {[["approvals", `Approvals${pending.length ? ` (${pending.length})` : ""}`], ["staff", "Staff"], ["add", "Add staff"]].map(([k, label]) => (
             <button key={k} onClick={() => setTab(k)}
-              className={`rounded-lg px-4 py-2 text-sm font-medium ${tab === k ? "bg-slate-800 text-white" : "bg-white text-slate-600 ring-1 ring-slate-200"}`}>
+              className={`rounded-lg px-4 py-2 text-sm font-medium ${tab === k ? "bg-slate-800 text-white" : "bg-surface-750 text-gray-300 ring-1 ring-line"}`}>
               {label}
             </button>
           ))}
@@ -89,25 +89,25 @@ export default function AdminDashboard() {
 
       <main className="mx-auto max-w-6xl px-6 py-6">
         {loading ? (
-          <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div>
+          <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-gray-500" /></div>
         ) : tab === "approvals" ? (
-          <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100">
-            <h2 className="font-semibold text-slate-800">Pending staff requests</h2>
+          <div className="rounded-2xl bg-surface-750 p-5 shadow-sm ring-1 ring-line">
+            <h2 className="font-semibold text-white">Pending staff requests</h2>
             {pending.length === 0 ? (
-              <p className="mt-3 text-sm text-slate-400">No pending requests.</p>
+              <p className="mt-3 text-sm text-gray-500">No pending requests.</p>
             ) : (
-              <ul className="mt-3 divide-y divide-slate-100">
+              <ul className="mt-3 divide-y divide-line">
                 {pending.map((m) => (
                   <li key={m.id} className="flex items-center justify-between py-3">
                     <div>
-                      <p className="font-medium text-slate-800">{m.full_name}</p>
-                      <p className="text-xs text-slate-500">{m.email} · {m.role} · {deptLabel(m.department)}</p>
+                      <p className="font-medium text-white">{m.full_name}</p>
+                      <p className="text-xs text-gray-400">{m.email} · {m.role} · {deptLabel(m.department)}</p>
                     </div>
                     <div className="flex gap-2">
                       <button onClick={() => approve(m.id)} className="flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700">
                         <Check className="h-4 w-4" /> Approve
                       </button>
-                      <button onClick={() => reject(m.id)} className="flex items-center gap-1 rounded-lg bg-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-300">
+                      <button onClick={() => reject(m.id)} className="flex items-center gap-1 rounded-lg bg-surface-700 px-3 py-1.5 text-sm font-semibold text-gray-200 hover:bg-surface-700">
                         <X className="h-4 w-4" /> Reject
                       </button>
                     </div>
@@ -117,10 +117,10 @@ export default function AdminDashboard() {
             )}
           </div>
         ) : tab === "staff" ? (
-          <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-100">
+          <div className="overflow-hidden rounded-2xl bg-surface-750 shadow-sm ring-1 ring-line">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-100 text-left text-slate-500">
+                <tr className="border-b border-line text-left text-gray-400">
                   <th className="px-6 py-3 font-medium">Name</th>
                   <th className="px-6 py-3 font-medium">Email</th>
                   <th className="px-6 py-3 font-medium">Role</th>
@@ -131,15 +131,15 @@ export default function AdminDashboard() {
               </thead>
               <tbody>
                 {staff.map((m) => (
-                  <tr key={m.id} className="border-b border-slate-50">
-                    <td className="px-6 py-3 text-slate-800">{m.full_name}</td>
-                    <td className="px-6 py-3 text-slate-600">{m.email}</td>
-                    <td className="px-6 py-3"><span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700">{m.role}</span></td>
-                    <td className="px-6 py-3 text-slate-600">{deptLabel(m.department)}</td>
-                    <td className="px-6 py-3">{m.is_active ? <span className="text-emerald-700">Active</span> : <span className="text-slate-400">{m.status}</span>}</td>
+                  <tr key={m.id} className="border-b border-line">
+                    <td className="px-6 py-3 text-white">{m.full_name}</td>
+                    <td className="px-6 py-3 text-gray-300">{m.email}</td>
+                    <td className="px-6 py-3"><span className="rounded-full bg-surface-700 px-2 py-0.5 text-xs text-gray-200">{m.role}</span></td>
+                    <td className="px-6 py-3 text-gray-300">{deptLabel(m.department)}</td>
+                    <td className="px-6 py-3">{m.is_active ? <span className="text-emerald-300">Active</span> : <span className="text-gray-500">{m.status}</span>}</td>
                     <td className="px-6 py-3 text-right">
-                      {m.id === user?.id ? <span className="text-xs text-slate-400">You</span> : m.status !== "PENDING" && (
-                        <button onClick={() => toggleActive(m)} className="inline-flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-slate-900">
+                      {m.id === user?.id ? <span className="text-xs text-gray-500">You</span> : m.status !== "PENDING" && (
+                        <button onClick={() => toggleActive(m)} className="inline-flex items-center gap-1 text-xs font-medium text-gray-300 hover:text-white">
                           {m.is_active ? <><ShieldOff className="h-4 w-4" /> Deactivate</> : <><ShieldCheck className="h-4 w-4" /> Activate</>}
                         </button>
                       )}
@@ -150,32 +150,32 @@ export default function AdminDashboard() {
             </table>
           </div>
         ) : (
-          <div className="max-w-md rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-100">
-            <h2 className="mb-4 flex items-center gap-2 font-semibold text-slate-800"><UserPlus className="h-5 w-5 text-teal-700" /> Add staff</h2>
+          <div className="max-w-md rounded-2xl bg-surface-750 p-6 shadow-sm ring-1 ring-line">
+            <h2 className="mb-4 flex items-center gap-2 font-semibold text-white"><UserPlus className="h-5 w-5 text-brand-300" /> Add staff</h2>
             <form onSubmit={handleCreate} className="space-y-3">
               <Field label="Full name" value={form.full_name} onChange={(v) => setForm({ ...form, full_name: v })} required />
               <Field label="Email" type="email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} required />
               <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Role</label>
+                <label className="mb-1 block text-sm font-medium text-gray-200">Role</label>
                 <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                  className="w-full rounded-lg border border-line bg-surface-800 text-white placeholder-gray-500 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500">
                   {CREATE_ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
               </div>
               {form.role === "DOCTOR" && (
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Department</label>
+                  <label className="mb-1 block text-sm font-medium text-gray-200">Department</label>
                   <select value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} required
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                    className="w-full rounded-lg border border-line bg-surface-800 text-white placeholder-gray-500 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500">
                     <option value="">Select…</option>
                     {DEPARTMENTS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
                   </select>
                 </div>
               )}
               <Field label="Password (optional — emailed if blank)" type="password" value={form.password} onChange={(v) => setForm({ ...form, password: v })} />
-              {formError && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</div>}
+              {formError && <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{formError}</div>}
               <button type="submit" disabled={saving}
-                className="flex w-full items-center justify-center gap-2 rounded-lg bg-teal-600 px-4 py-2.5 font-medium text-white hover:bg-teal-700 disabled:opacity-60">
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 font-medium text-white hover:bg-brand-500 disabled:opacity-60">
                 {saving ? <Loader2 className="h-5 w-5 animate-spin" /> : <UserPlus className="h-5 w-5" />} Create account
               </button>
             </form>
@@ -189,9 +189,9 @@ export default function AdminDashboard() {
 function Field({ label, value, onChange, type = "text", required }) {
   return (
     <div>
-      <label className="mb-1 block text-sm font-medium text-slate-700">{label}</label>
+      <label className="mb-1 block text-sm font-medium text-gray-200">{label}</label>
       <input type={type} value={value} required={required} onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+        className="w-full rounded-lg border border-line bg-surface-800 text-white placeholder-gray-500 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500" />
     </div>
   );
 }

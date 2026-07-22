@@ -36,7 +36,7 @@ export default function DoctorDashboard() {
 
   if (active) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
+      <div className="min-h-screen bg-surface-800">
         <DashboardHeader user={user} logout={logout} />
         <EncounterView
           encounter={active}
@@ -47,30 +47,30 @@ export default function DoctorDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
+    <div className="min-h-screen bg-surface-800">
       <DashboardHeader user={user} logout={logout} />
       <main className="mx-auto max-w-6xl px-6 py-6">
-        <h2 className="flex items-center gap-2 text-lg font-bold text-slate-800">
+        <h2 className="flex items-center gap-2 text-lg font-bold text-white">
           <Stethoscope className="h-5 w-5 text-blue-500" /> My patient queue
         </h2>
         {loading ? (
           <div className="mt-8 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-blue-500" /></div>
         ) : queue.length === 0 ? (
-          <p className="mt-6 rounded-xl bg-white p-6 text-center text-sm text-slate-500 shadow-sm ring-1 ring-slate-100">
+          <p className="mt-6 rounded-xl bg-surface-750 p-6 text-center text-sm text-gray-400 shadow-sm ring-1 ring-line">
             No patients waiting. Once a nurse records vitals, patients appear here.
           </p>
         ) : (
           <div className="mt-4 grid gap-3">
             {queue.map((e) => (
               <button key={e.id} onClick={() => setActive(e)}
-                className="flex items-center justify-between rounded-xl bg-white p-4 text-left shadow-sm ring-1 ring-slate-100 hover:ring-blue-200">
+                className="flex items-center justify-between rounded-xl bg-surface-750 p-4 text-left shadow-sm ring-1 ring-line hover:ring-blue-200">
                 <div>
-                  <p className="font-semibold text-slate-800">{e.patient_name}</p>
-                  <p className="text-xs text-slate-500">
+                  <p className="font-semibold text-white">{e.patient_name}</p>
+                  <p className="text-xs text-gray-400">
                     {e.hospital_identifier} · {e.department_display} · {e.chief_complaint || "No complaint noted"}
                   </p>
                 </div>
-                <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                <span className="rounded-full bg-blue-500/10 px-2.5 py-0.5 text-xs font-medium text-blue-300">
                   {ENCOUNTER_STATUS_LABELS[e.status]}
                 </span>
               </button>
@@ -97,26 +97,26 @@ function EncounterView({ encounter, onBack }) {
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-6">
-      <button onClick={onBack} className="mb-4 flex items-center gap-1 text-sm text-slate-500 hover:text-slate-800">
+      <button onClick={onBack} className="mb-4 flex items-center gap-1 text-sm text-gray-400 hover:text-white">
         <ArrowLeft className="h-4 w-4" /> Back to queue
       </button>
 
       {patient && (
-        <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100">
+        <div className="rounded-2xl bg-surface-750 p-5 shadow-sm ring-1 ring-line">
           <div className="flex items-start justify-between">
             <div>
-              <h2 className="text-xl font-bold text-slate-900">{patient.first_name} {patient.last_name}</h2>
-              <p className="text-sm text-slate-500">
+              <h2 className="text-xl font-bold text-white">{patient.first_name} {patient.last_name}</h2>
+              <p className="text-sm text-gray-400">
                 {patient.hospital_identifier} · {patient.gender} · {patient.age} yrs · {patient.blood_group}
               </p>
             </div>
           </div>
           {allergies.length > 0 && (
-            <div className="mt-4 flex items-start gap-2 rounded-lg bg-red-50 px-4 py-3 ring-1 ring-red-200">
-              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+            <div className="mt-4 flex items-start gap-2 rounded-lg bg-red-500/10 px-4 py-3 ring-1 ring-red-200">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-300" />
               <div>
-                <p className="text-sm font-semibold text-red-700">Allergy alert</p>
-                <p className="text-sm text-red-600">{allergies.join(", ")}</p>
+                <p className="text-sm font-semibold text-red-300">Allergy alert</p>
+                <p className="text-sm text-red-300">{allergies.join(", ")}</p>
               </div>
             </div>
           )}
@@ -131,7 +131,7 @@ function EncounterView({ encounter, onBack }) {
           ["prescribe", "Prescribe", Pill],
         ].map(([key, label, Icon]) => (
           <button key={key} onClick={() => setTab(key)}
-            className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium ${tab === key ? "bg-blue-600 text-white" : "bg-white text-slate-600 ring-1 ring-slate-200"}`}>
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium ${tab === key ? "bg-blue-600 text-white" : "bg-surface-750 text-gray-300 ring-1 ring-line"}`}>
             <Icon className="h-4 w-4" /> {label}
           </button>
         ))}
@@ -152,8 +152,8 @@ function Timeline({ data }) {
   return (
     <div className="space-y-4">
       {(data.trends || []).length > 0 && (
-        <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100">
-          <h3 className="mb-3 font-semibold text-slate-800">Lab trends</h3>
+        <div className="rounded-2xl bg-surface-750 p-5 shadow-sm ring-1 ring-line">
+          <h3 className="mb-3 font-semibold text-white">Lab trends</h3>
           <div className="grid gap-4 md:grid-cols-2">
             {data.trends.map((t) => (
               <TrendChart key={t.test_code} points={t.points} unit={t.unit} label={t.test_name} />
@@ -163,13 +163,13 @@ function Timeline({ data }) {
         </div>
       )}
       <Panel title="Diagnoses" items={data.diagnoses} render={(d) => (
-        <>{d.disease_name} <span className="text-xs text-slate-400">({d.icd10_code}) · {d.clinical_status}</span></>
+        <>{d.disease_name} <span className="text-xs text-gray-500">({d.icd10_code}) · {d.clinical_status}</span></>
       )} />
       <Panel title="Lab results" items={data.lab_results} render={(r) => (
-        <>{r.test_name}: <b>{r.result_value ?? r.report_text}</b> {r.result_unit} {r.flag && r.flag !== "NORMAL" && <span className="text-red-600">({r.flag})</span>}</>
+        <>{r.test_name}: <b>{r.result_value ?? r.report_text}</b> {r.result_unit} {r.flag && r.flag !== "NORMAL" && <span className="text-red-300">({r.flag})</span>}</>
       )} />
       <Panel title="Prescriptions" items={data.prescriptions} render={(p) => (
-        <>{p.medication_name} <span className="text-xs text-slate-400">· {p.status}</span></>
+        <>{p.medication_name} <span className="text-xs text-gray-500">· {p.status}</span></>
       )} />
     </div>
   );
@@ -177,13 +177,13 @@ function Timeline({ data }) {
 
 function Panel({ title, items, render }) {
   return (
-    <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100">
-      <h3 className="font-semibold text-slate-800">{title}</h3>
+    <div className="rounded-2xl bg-surface-750 p-5 shadow-sm ring-1 ring-line">
+      <h3 className="font-semibold text-white">{title}</h3>
       {!items || items.length === 0 ? (
-        <p className="mt-2 text-sm text-slate-400">None on record.</p>
+        <p className="mt-2 text-sm text-gray-500">None on record.</p>
       ) : (
-        <ul className="mt-2 space-y-1.5 text-sm text-slate-700">
-          {items.map((it) => <li key={it.id} className="border-b border-slate-50 pb-1.5">{render(it)}</li>)}
+        <ul className="mt-2 space-y-1.5 text-sm text-gray-200">
+          {items.map((it) => <li key={it.id} className="border-b border-line pb-1.5">{render(it)}</li>)}
         </ul>
       )}
     </div>
@@ -213,14 +213,14 @@ function DiagnosePanel({ encounter, onDone }) {
   }
 
   return (
-    <form onSubmit={submit} className="space-y-3 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100">
-      <h3 className="font-semibold text-slate-800">Record a diagnosis</h3>
-      <select value={code} onChange={(e) => setCode(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+    <form onSubmit={submit} className="space-y-3 rounded-2xl bg-surface-750 p-5 shadow-sm ring-1 ring-line">
+      <h3 className="font-semibold text-white">Record a diagnosis</h3>
+      <select value={code} onChange={(e) => setCode(e.target.value)} className="w-full rounded-lg border border-line bg-surface-800 text-white placeholder-gray-500 px-3 py-2 text-sm">
         {catalog.map((c) => <option key={c.code} value={c.code}>{c.code} — {c.name}</option>)}
       </select>
       <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Clinical notes (optional)"
-        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" rows={3} />
-      {msg && <p className="text-sm text-slate-600">{msg}</p>}
+        className="w-full rounded-lg border border-line bg-surface-800 text-white placeholder-gray-500 px-3 py-2 text-sm" rows={3} />
+      {msg && <p className="text-sm text-gray-300">{msg}</p>}
       <button disabled={busy} className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60">
         {busy && <Loader2 className="h-4 w-4 animate-spin" />} Save diagnosis
       </button>
@@ -250,16 +250,16 @@ function OrderLabPanel({ encounter, onDone }) {
   }
 
   return (
-    <form onSubmit={submit} className="space-y-3 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100">
-      <h3 className="font-semibold text-slate-800">Order a lab test</h3>
-      <select value={code} onChange={(e) => setCode(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+    <form onSubmit={submit} className="space-y-3 rounded-2xl bg-surface-750 p-5 shadow-sm ring-1 ring-line">
+      <h3 className="font-semibold text-white">Order a lab test</h3>
+      <select value={code} onChange={(e) => setCode(e.target.value)} className="w-full rounded-lg border border-line bg-surface-800 text-white placeholder-gray-500 px-3 py-2 text-sm">
         {catalog.map((c) => <option key={c.code} value={c.code}>{c.name} ({c.category})</option>)}
       </select>
-      <select value={priority} onChange={(e) => setPriority(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+      <select value={priority} onChange={(e) => setPriority(e.target.value)} className="w-full rounded-lg border border-line bg-surface-800 text-white placeholder-gray-500 px-3 py-2 text-sm">
         <option value="ROUTINE">Routine</option>
         <option value="URGENT">Urgent</option>
       </select>
-      {msg && <p className="text-sm text-slate-600">{msg}</p>}
+      {msg && <p className="text-sm text-gray-300">{msg}</p>}
       <button disabled={busy} className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60">
         {busy && <Loader2 className="h-4 w-4 animate-spin" />} Send order
       </button>
@@ -284,14 +284,14 @@ function PrescribePanel({ encounter, onDone }) {
   }
 
   return (
-    <form onSubmit={submit} className="space-y-3 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100">
-      <h3 className="font-semibold text-slate-800">Write a prescription</h3>
-      <p className="text-xs text-slate-400">Check the allergy banner above before prescribing.</p>
+    <form onSubmit={submit} className="space-y-3 rounded-2xl bg-surface-750 p-5 shadow-sm ring-1 ring-line">
+      <h3 className="font-semibold text-white">Write a prescription</h3>
+      <p className="text-xs text-gray-500">Check the allergy banner above before prescribing.</p>
       <input value={medication} onChange={(e) => setMedication(e.target.value)} placeholder="Medication (e.g. Amlodipine 5mg)" required
-        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+        className="w-full rounded-lg border border-line bg-surface-800 text-white placeholder-gray-500 px-3 py-2 text-sm" />
       <input value={dosage} onChange={(e) => setDosage(e.target.value)} placeholder="Dosage (e.g. 1 tablet once daily)" required
-        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-      {msg && <p className="text-sm text-slate-600">{msg}</p>}
+        className="w-full rounded-lg border border-line bg-surface-800 text-white placeholder-gray-500 px-3 py-2 text-sm" />
+      {msg && <p className="text-sm text-gray-300">{msg}</p>}
       <button disabled={busy} className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60">
         {busy && <Loader2 className="h-4 w-4 animate-spin" />} Send to pharmacy
       </button>
